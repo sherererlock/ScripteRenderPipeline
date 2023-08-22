@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-public class CameraRenderer
+public partial class CameraRenderer
 {
   	ScriptableRenderContext context;
 	Camera camera;
@@ -17,15 +17,19 @@ public class CameraRenderer
 
 	static ShaderTagId unlitShaderTagId = new ShaderTagId("SRPDefaultUnlit");
 
-	public void Render (ScriptableRenderContext context, Camera camera) {
+    public void Render (ScriptableRenderContext context, Camera camera) {
 		this.context = context;
 		this.camera = camera;
 
-		if(!Cull())
+		PrepareBuffer();
+		PrepareForSceneWindow();
+		if (!Cull())
 			return;
 
 		Setup();
 		DrawVisibleGeometry();
+		DrawUnSupportedShaders();
+		DrawGizmos();
 		Submit();
 	} 
 
@@ -40,8 +44,14 @@ public class CameraRenderer
 	void Setup()
     {
 		context.SetupCameraProperties(camera);
-		buffer.ClearRenderTarget(true, true, Color.clear);
-		buffer.BeginSample(bufferName);
+		CameraClearFlags flag = camera.clearFlags;
+
+		buffer.ClearRenderTarget(
+			flag <= CameraClearFlags.Depth,
+			flag == CameraClearFlags.Color, 
+			flag == CameraClearFlags.Color ? camera.backgroundColor.linear : Color.clear);
+
+		buffer.BeginSample(SampleName);
 		ExecuteBuffer();
     }
 
@@ -53,17 +63,21 @@ public class CameraRenderer
         };
 
 		var drawSettings = new DrawingSettings(unlitShaderTagId, sortingSetting);
-
-		var filteringSetting = new FilteringSettings(RenderQueueRange.all);
-
+		var filteringSetting = new FilteringSettings(RenderQueueRange.opaque);
 		context.DrawRenderers(cullingResults, ref drawSettings, ref filteringSetting);
 
 		context.DrawSkybox(camera);
-    }
+
+		sortingSetting.criteria = SortingCriteria.CommonTransparent;
+		drawSettings.sortingSettings = sortingSetting;
+		filteringSetting.renderQueueRange = RenderQueueRange.transparent;
+
+		context.DrawRenderers(cullingResults, ref drawSettings, ref filteringSetting);
+	}
 
 	void Submit()
     {
-		buffer.EndSample(bufferName);
+		buffer.EndSample(SampleName);
 		ExecuteBuffer();
 		context.Submit();
     }
