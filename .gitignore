@@ -75,3 +75,5 @@ Library/
 UserSettings/
 Logs/
 Packages/
+Temp/
+obj/
