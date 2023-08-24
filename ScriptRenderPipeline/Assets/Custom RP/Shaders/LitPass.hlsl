@@ -71,6 +71,7 @@ float4 LitPassFragment(Varings input) : SV_TARGET
 	surface.metallic = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Metallic);
 	surface.smoothness = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Smoothness);
 	surface.viewDirection = normalize(_WorldSpaceCameraPos - input.positionWS);
+	surface.depth = -TransformWorldToView(input.positionWS).z;
 	
 	#ifdef _CLIPPING
 	clip(base.a - UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Cutoff));
