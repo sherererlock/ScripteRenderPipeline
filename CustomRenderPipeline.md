@@ -58,3 +58,60 @@ void CustomRenderPipeline::Render(ScriptableRenderContext context, Camera[] came
 ```
 
 shader
+
+```mermaid
+classDiagram
+class Surface{
+    float3 position;
+    float3 color;
+    float3 normal;
+    float3 viewDirection;
+    float depth;
+    float alpha;
+    float metallic;
+    float smoothness;	
+}
+
+class Light{
+    float3 color;
+    float3 direction;
+    float attenuation;
+}
+
+class ShadowData{
+	int cascadeIndex;
+	float strength;
+}
+
+class DirectionalShadowData {
+	float shadowStrength;
+	int tileIndex;
+	float normalBias;
+}
+
+class BRDF {
+    float3 diffuse;
+    float3 specular;
+    float roughness;
+}
+
+
+```
+
+流程
+
+```c#
+float4 LitPassFragment(Varings input)
+{
+    // 构造Surface
+    
+    // 根据Surface计算BRDF
+    
+    // 计算光照
+    float3 GetLighting(Surface surface, BRDF brdf)
+    {
+        
+    }
+}
+```
+

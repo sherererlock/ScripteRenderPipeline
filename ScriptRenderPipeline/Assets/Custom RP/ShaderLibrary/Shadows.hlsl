@@ -16,7 +16,6 @@ CBUFFER_START(_CustomShadows)
 	float4x4 _DirectionalShadowMatrices[Max_Directional_Light_Count * Max_Cascades_Count];
 CBUFFER_END
 
-
 struct ShadowData
 {
 	int cascadeIndex;
@@ -48,7 +47,8 @@ float GetDirectionalShadowAttenuation(DirectionalShadowData data, ShadowData sha
 	return lerp(1.0, shadow, data.shadowStrength);
 }
 
-float FadedShadowStrength(float distance, float scale, float fade) {
+float FadedShadowStrength(float distance, float scale, float fade)
+{
 	return saturate((1.0 - distance * scale) * fade);
 }
 
