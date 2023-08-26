@@ -248,3 +248,711 @@ SampleSingleLightmap函数需要更多的参数。首先，我们必须将纹理
 ![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/sampling-baked-light/environment-intensity-inspector.png)
 
 ## Light Probes
+
+动态物体不会影响烘培全局光照，但可以通过光探头受到其影响。光探头是场景中的一个点，通过三阶多项式（具体而言是L2球谐函数）来近似所有传入光线的烘培结果。光探头分布在场景周围，Unity会在物体之间进行插值，以得出它们位置的最终光照近似值。
+
+### Light Probe Group
+
+通过在场景中创建光探头组（GameObject / Light / Light Probe Group），可以向场景添加光探头。这将创建一个带有LightProbeGroup组件的游戏对象，默认情况下它包含六个呈立方体形状排列的探头。当启用“Edit Light Probes”时，您可以像操作游戏对象一样移动、复制和删除单个探头。
+
+![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-editing-inspector.png)
+
+一个场景中可以有多个探头组。Unity将它们所有的探头组合在一起，然后创建一个连接它们的四面体体积网格。每个动态物体最终位于一个四面体内部。其顶点处的四个探头会进行插值，得出应用于该物体的最终光照。如果一个物体位于探头覆盖范围之外，会使用最近三角形的光照信息代替，因此光照可能看起来有些奇怪。
+
+默认情况下，选中动态物体时会使用图标来显示影响该物体的探头，以及其位置处的插值结果。您可以通过在光照窗口的调试设置中调整“Light Probe Visualization”来更改这一行为。
+
+![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-selected-inspector.png)
+
+![scene](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-selected-scene.png)
+
+放置光探头的位置取决于场景。首先，只有在动态物体将出现的地方才需要它们。其次，在光照发生变化的地方放置它们。每个探头都是插值的端点，所以将它们放在光照过渡的周围。第三，不要将它们放在烘培几何体内，因为它们会变成黑色。最后，插值会穿过物体，因此如果墙的两侧光照不同，请将探头靠近墙的两侧。这样，没有物体会在两侧之间插值。除此之外，您需要进行实验来找到最佳位置。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-all.png)
+
+### Sampling Probes
+
+插值的光探头数据必须针对每个物体传递到GPU。我们需要告诉Unity这样做，这次是通过PerObjectData.LightProbe而不是PerObjectData.Lightmaps来实现。我们需要同时启用这两个特性标志，因此可以使用布尔的“或”运算符将它们组合起来。
+
+```
+perObjectData = PerObjectData.Lightmaps | PerObjectData.LightProbe
+```
+
+所需的UnityPerDraw数据由七个float4向量组成，分别表示红色、绿色和蓝色光的多项式分量。它们的名称为unity_SH*，其中*可以是A、B或C。前两个有带有r、g和b后缀的三个版本。
+
+```
+CBUFFER_START(UnityPerDraw)
+	…
+
+	float4 unity_SHAr;
+	float4 unity_SHAg;
+	float4 unity_SHAb;
+	float4 unity_SHBr;
+	float4 unity_SHBg;
+	float4 unity_SHBb;
+	float4 unity_SHC;
+CBUFFER_END
+```
+
+在全局光照（GI）中，我们通过一个新的SampleLightProbe函数对光探头进行采样。我们需要一个方向来进行采样，所以将世界空间的表面参数传递给它。
+
+如果此物体正在使用光照贴图，则返回零。否则返回零和SampleSH9中的最大值。该函数需要探头数据和法线向量作为参数。探头数据必须以系数数组的形式提供。
+
+```
+float3 SampleLightProbe (Surface surfaceWS) {
+	#if defined(LIGHTMAP_ON)
+		return 0.0;
+	#else
+		float4 coefficients[7];
+		coefficients[0] = unity_SHAr;
+		coefficients[1] = unity_SHAg;
+		coefficients[2] = unity_SHAb;
+		coefficients[3] = unity_SHBr;
+		coefficients[4] = unity_SHBg;
+		coefficients[5] = unity_SHBb;
+		coefficients[6] = unity_SHC;
+		return max(0.0, SampleSH9(coefficients, surfaceWS.normal));
+	#endif
+}
+```
+
+向GetGI添加一个表面参数，并使其将光探头样本添加到漫反射光中。
+
+```
+GI GetGI (float2 lightMapUV, Surface surfaceWS) {
+	GI gi;
+	gi.diffuse = SampleLightMap(lightMapUV) + SampleLightProbe(surfaceWS);
+	return gi;
+}
+```
+
+Finally, pass the surface to it in `LitPassFragment`.
+
+```
+	GI gi = GetGI(GI_FRAGMENT_DATA(input), surface);
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/sampling-probes.png)
+
+### Light Probe Proxy Volumes
+
+光探头适用于相对较小的动态物体，但由于光照是基于单个点的，所以对于较大的物体效果不佳。例如，我在场景中添加了两个拉伸的立方体。由于它们的位置位于暗区域内，这些立方体是均匀暗淡的，尽管显然这与实际光照不符合。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/large-objects-single-probe.png)
+
+
+我们可以通过使用光探头代理体积（Light Probe Proxy Volume，简称LPPV）来解决这个限制。最简单的方法是为每个立方体添加一个LightProbeProxyVolume组件，然后将它们的Light Probes模式设置为使用代理体积。
+
+这些体积可以以多种方式进行配置。在这种情况下，我使用了自定义分辨率模式，在立方体的边缘放置了子探头，使它们可见。
+
+![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/lppv-inspector.png)
+
+![scene](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/lppv-scene.png)
+
+### Sampling LPPVs
+
+LPPV也需要将数据针对每个物体传递到GPU。在这种情况下，我们需要启用PerObjectData.LightProbeProxyVolume。
+
+```
+	perObjectData =
+				PerObjectData.Lightmaps | PerObjectData.LightProbe |
+				PerObjectData.LightProbeProxyVolume
+```
+
+还需要向UnityPerDraw添加四个额外的值：unity_ProbeVolumeParams、unity_ProbeVolumeWorldToObject、unity_ProbeVolumeSizeInv和unity_ProbeVolumeMin。其中第二个是一个矩阵，而其他三个是4D向量。
+
+```
+CBUFFER_START(UnityPerDraw)
+	…
+
+	float4 unity_ProbeVolumeParams;
+	float4x4 unity_ProbeVolumeWorldToObject;
+	float4 unity_ProbeVolumeSizeInv;
+	float4 unity_ProbeVolumeMin;
+CBUFFER_END
+```
+
+体积数据存储在一个3D浮点纹理中，称为unity_ProbeVolumeSH。通过TEXTURE3D_FLOAT宏将其与采样器状态一起添加到GI中。
+
+```
+TEXTURE3D_FLOAT(unity_ProbeVolumeSH);
+SAMPLER(samplerunity_ProbeVolumeSH);
+```
+
+是使用LPPV还是插值的光探头是通过unity_ProbeVolumeParams的第一个分量进行通信的。如果它被设置了，我们就必须通过SampleProbeVolumeSH4函数对体积进行采样。我们需要将纹理和采样器传递给它，然后是世界位置和法线。之后是矩阵，随后是unity_ProbeVolumeParams的Y和Z分量，然后是min和size-inv数据的XYZ部分。
+
+```
+		if (unity_ProbeVolumeParams.x) {
+			return SampleProbeVolumeSH4(
+				TEXTURE3D_ARGS(unity_ProbeVolumeSH, samplerunity_ProbeVolumeSH),
+				surfaceWS.position, surfaceWS.normal,
+				unity_ProbeVolumeWorldToObject,
+				unity_ProbeVolumeParams.y, unity_ProbeVolumeParams.z,
+				unity_ProbeVolumeMin.xyz, unity_ProbeVolumeSizeInv.xyz
+			);
+		}
+		else {
+			float4 coefficients[7];
+			coefficients[0] = unity_SHAr;
+			coefficients[1] = unity_SHAg;
+			coefficients[2] = unity_SHAb;
+			coefficients[3] = unity_SHBr;
+			coefficients[4] = unity_SHBg;
+			coefficients[5] = unity_SHBb;
+			coefficients[6] = unity_SHC;
+			return max(0.0, SampleSH9(coefficients, surfaceWS.normal));
+		}
+```
+
+对LPPV进行采样需要将其转换到体积空间，以及一些其他的计算，包括体积纹理采样和球谐函数的应用。在这种情况下，只应用L1球谐函数，因此结果不太精确，但可以在单个物体的表面上变化。
+
+## Meta Pass
+
+因为间接漫反射光会从表面反射，所以它会受到这些表面漫反射率的影响。目前这一点并未实现。Unity将我们的表面视为均匀白色。Unity在**烘焙时**使用特殊的Meta Pass来确定反射光。由于我们尚未定义这样的通道，Unity使用默认通道，结果为白色。
+
+### Unified Input
+
+添加另一个通道意味着我们需要重新定义着色器属性。让我们从LitPass中提取基础纹理和UnityPerMaterial缓冲，并将它们放入一个新的Shaders/LitInput.hlsl文件中。我们还可以通过引入TransformBaseUV、GetBase、GetCutoff、GetMetallic和GetSmoothness函数来隐藏实例化代码。为所有这些函数都提供一个基础UV参数，即使它未被使用。这样隐藏了值是从贴图中获取还是其他方式获取的。
+
+```
+#ifndef CUSTOM_LIT_INPUT_INCLUDED
+#define CUSTOM_LIT_INPUT_INCLUDED
+
+TEXTURE2D(_BaseMap);
+SAMPLER(sampler_BaseMap);
+
+UNITY_INSTANCING_BUFFER_START(UnityPerMaterial)
+	UNITY_DEFINE_INSTANCED_PROP(float4, _BaseMap_ST)
+	UNITY_DEFINE_INSTANCED_PROP(float4, _BaseColor)
+	UNITY_DEFINE_INSTANCED_PROP(float, _Cutoff)
+	UNITY_DEFINE_INSTANCED_PROP(float, _Metallic)
+	UNITY_DEFINE_INSTANCED_PROP(float, _Smoothness)
+UNITY_INSTANCING_BUFFER_END(UnityPerMaterial)
+
+float2 TransformBaseUV (float2 baseUV) {
+	float4 baseST = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _BaseMap_ST);
+	return baseUV * baseST.xy + baseST.zw;
+}
+
+float4 GetBase (float2 baseUV) {
+	float4 map = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV);
+	float4 color = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _BaseColor);
+	return map * color;
+}
+
+float GetCutoff (float2 baseUV) {
+	return UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Cutoff);
+}
+
+float GetMetallic (float2 baseUV) {
+	return UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Metallic);
+}
+
+float GetSmoothness (float2 baseUV) {
+	return UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Smoothness);
+}
+
+#endif
+```
+
+为了在Lit的所有通道中包含这个文件，在其SubShader块的顶部添加一个HLSLINCLUDE块，位于通道之前。在其中包含Common，然后是LitInput。这段代码将会插入到所有通道的开头。
+
+```
+	SubShader {
+		HLSLINCLUDE
+		#include "../ShaderLibrary/Common.hlsl"
+		#include "LitInput.hlsl"
+		ENDHLSL
+		
+		…
+	}
+```
+
+Remove the now duplicate include statement and declarations from *LitPass*.
+
+Use `TransformBaseUV` in `LitPassVertex`.
+
+```
+output.baseUV = TransformBaseUV(input.baseUV);
+```
+
+And the relevant functions to retrieve shader properties in `LitPassFragment`.
+
+```
+	//float4 baseMap = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.baseUV);
+	//float4 baseColor = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _BaseColor);
+	float4 base = GetBase(input.baseUV);
+	#if defined(_CLIPPING)
+		clip(base.a - GetCutoff(input.baseUV));
+	#endif
+	
+	…
+	surface.metallic = GetMetallic(input.baseUV);
+	surface.smoothness = GetSmoothness(input.baseUV);
+```
+
+### Unlit
+
+让我们也对Unlit着色器进行类似的操作。复制LitInput.hlsl并将其重命名为UnlitInput.hlsl。然后从UnityPerMaterial版本中删除_Metallic和_Smoothness。保留GetMetallic和GetSmoothness函数，并使它们返回0.0，表示非常暗淡的漫反射表面。之后，也为着色器添加一个HLSLINCLUDE块。
+
+```
+	HLSLINCLUDE
+		#include "../ShaderLibrary/Common.hlsl"
+		#include "UnlitInput.hlsl"
+		ENDHLSL
+```
+
+像我们为LitPass做的那样，将UnlitPass进行转换。请注意，ShadowCasterPass适用于两种着色器，尽管它最终具有不同的输入定义。
+
+### Meta Light Mode
+
+在Lit和Unlit着色器中都添加一个新的通道，将LightMode设置为Meta。该通道需要关闭剔除，可以通过添加Cull Off选项来配置。它将使用在一个新的MetaPass.hlsl文件中定义的MetaPassVertex和MetaPassFragment函数。它不需要多重编译指令。
+
+```
+		Pass {
+			Tags {
+				"LightMode" = "Meta"
+			}
+
+			Cull Off
+
+			HLSLPROGRAM
+			#pragma target 3.5
+			#pragma vertex MetaPassVertex
+			#pragma fragment MetaPassFragment
+			#include "MetaPass.hlsl"
+			ENDHLSL
+		}
+```
+
+我们需要获取表面的漫反射率，所以我们必须在MetaPassFragment中获取它的BRDF数据。因此，我们必须包括BRDF，以及Surface、Shadows和Light，因为它依赖于它们。我们只需要知道物体空间的位置和基础UV，最初将裁剪空间位置设置为零。可以通过ZERO_INITIALIZE(Surface, surface)将表面初始化为零，之后我们只需要设置其颜色、金属度和光滑度值。这足以获取BRDF数据，但我们将从返回零开始。
+
+```c
+#ifndef CUSTOM_META_PASS_INCLUDED
+#define CUSTOM_META_PASS_INCLUDED
+
+#include "../ShaderLibrary/Surface.hlsl"
+#include "../ShaderLibrary/Shadows.hlsl"
+#include "../ShaderLibrary/Light.hlsl"
+#include "../ShaderLibrary/BRDF.hlsl"
+
+struct Attributes {
+	float3 positionOS : POSITION;
+	float2 baseUV : TEXCOORD0;
+};
+
+struct Varyings {
+	float4 positionCS : SV_POSITION;
+	float2 baseUV : VAR_BASE_UV;
+};
+
+Varyings MetaPassVertex (Attributes input) {
+	Varyings output;
+	output.positionCS = 0.0;
+	output.baseUV = TransformBaseUV(input.baseUV);
+	return output;
+}
+
+float4 MetaPassFragment (Varyings input) : SV_TARGET {
+	float4 base = GetBase(input.baseUV);
+	Surface surface;
+	ZERO_INITIALIZE(Surface, surface);
+	surface.color = base.rgb;
+	surface.metallic = GetMetallic(input.baseUV);
+	surface.smoothness = GetSmoothness(input.baseUV);
+	BRDF brdf = GetBRDF(surface);
+	float4 meta = 0.0;
+	return meta;
+}
+
+#endif
+```
+
+一旦Unity使用我们自己的元通道重新烘焙场景，所有的间接光照都会消失，因为黑色的表面不会反射任何光线。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/meta-pass/no-indirect-light.png)
+
+### Light Map Coordinates
+
+就像采样光照贴图时一样，我们需要使用光照贴图的UV坐标。不同的是，这一次我们要沿相反的方向前进，将它们用于XY物体空间位置。之后，我们必须将它传递给TransformWorldToHClip函数，尽管在这种情况下，该函数执行的是与其名称所示不同类型的转换。
+
+```
+struct Attributes {
+	float3 positionOS : POSITION;
+	float2 baseUV : TEXCOORD0;
+	float2 lightMapUV : TEXCOORD1;
+};
+
+…
+
+Varyings MetaPassVertex (Attributes input) {
+	Varyings output;
+	input.positionOS.xy =
+		input.lightMapUV * unity_LightmapST.xy + unity_LightmapST.zw;
+	output.positionCS = TransformWorldToHClip(input.positionOS);
+	output.baseUV = TransformBaseUV(input.baseUV);
+	return output;
+}
+```
+
+我们仍然需要物体空间顶点属性作为输入，因为着色器希望它存在。实际上，似乎除非明确使用Z坐标，否则OpenGL无法工作。我们将使用与Unity自己的元通道相同的虚拟赋值，即input.positionOS.z > 0.0 ? FLT_MIN : 0.0。
+
+```
+	input.positionOS.xy =
+		input.lightMapUV * unity_LightmapST.xy + unity_LightmapST.zw;
+	input.positionOS.z = input.positionOS.z > 0.0 ? FLT_MIN : 0.0;
+```
+
+### Diffuse Reflectivity
+
+元通道可以用于生成不同的数据。所请求的内容是通过一个bool4 unity_MetaFragmentControl标志向量进行通信的。
+
+```
+bool4 unity_MetaFragmentControl;
+```
+
+如果设置了X标志，那么请求的是漫反射率，因此将其设置为RGB结果。A分量应设置为1。
+
+```
+	float4 meta = 0.0;
+	if (unity_MetaFragmentControl.x) {
+		meta = float4(brdf.diffuse, 1.0);
+        meta.rgb += brdf.specular * brdf.roughness * 0.5;
+        meta.rgb = min(
+			PositivePow(meta.rgb, unity_OneOverOutputBoost), unity_MaxOutputValue
+		); 
+	}
+	return meta;
+```
+
+这足以为反射光着色，但Unity的元通道还会稍微增强结果，方法是加上一半的高光反射率，乘以粗糙度。背后的想法是高度高光但粗糙的材质也会传递一些间接光。
+
+之后，结果会通过使用提供的unity_OneOverOutputBoost和PositivePow方法将其提升为一个幂，并将其限制在unity_MaxOutputValue内进行修改。
+
+These values are provided as floats.
+
+```
+float unity_OneOverOutputBoost;
+float unity_MaxOutputValue;
+```
+
+现在我们已经正确地获得了彩色的间接光照，还要在GetLighting中将接收表面的漫反射率应用于它。
+
+```
+float3 color = gi.diffuse * brdf.diffuse;
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/meta-pass/proper-lighting.png)
+
+同时，通过将环境光照的强度设置回1，让环境光照再次生效。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/meta-pass/environment-lighting.png)
+
+最后，将光源的模式设置回Mixed。这将使它再次成为实时光源，并且所有的间接漫反射光照都已烘焙完成。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/meta-pass/mixed-lighting.png)
+
+## Emissive Surfaces
+
+一些表面会自发地发出光，因此即使没有其他照明，它们也是可见的。这可以通过在LitPassFragment的末尾添加一些颜色来实现。这不是真正的光源，因此不会影响其他表面。然而，这种效果可以对烘焙的照明产生影响。
+
+### Emitted Light
+
+在Lit着色器中添加两个新属性：一个emission 贴图和颜色，就像基础贴图和颜色一样。然而，我们将为两者使用相同的坐标转换，所以我们不需要为emission 贴图显示单独的控制选项。它们可以通过给它添加NoScaleOffset属性来隐藏。为了支持非常明亮的emission 光，为颜色添加HDR属性。这使得可以通过检查器配置具有大于一的亮度的颜色，显示HRD颜色弹出窗口而不是常规颜色弹出窗口。
+
+作为示例，我创建了一个不透明的emission 材质，使用了Default-Particle纹理，其中包含一个圆形渐变，从而产生一个明亮的点。
+
+```
+		[NoScaleOffset] _EmissionMap("Emission", 2D) = "white" {}
+		[HDR] _EmissionColor("Emission", Color) = (0.0, 0.0, 0.0, 0.0)
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/emissive-surfaces/emissive-material.png)
+
+将贴图添加到LitInput并将发射颜色添加到UnityPerMaterial。然后添加一个名为GetEmission的函数，它的工作方式与GetBase类似，只是它使用另一个贴图和颜色。
+
+```
+TEXTURE2D(_BaseMap);
+TEXTURE2D(_EmissionMap);
+SAMPLER(sampler_BaseMap);
+
+UNITY_INSTANCING_BUFFER_START(UnityPerMaterial)
+	UNITY_DEFINE_INSTANCED_PROP(float4, _BaseMap_ST)
+	UNITY_DEFINE_INSTANCED_PROP(float4, _BaseColor)
+	UNITY_DEFINE_INSTANCED_PROP(float4, _EmissionColor)
+	…
+UNITY_INSTANCING_BUFFER_END(UnityPerMaterial)
+
+…
+
+float3 GetEmission (float2 baseUV) {
+	float4 map = SAMPLE_TEXTURE2D(_EmissionMap, sampler_BaseMap, baseUV);
+	float4 color = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _EmissionColor);
+	return map.rgb * color.rgb;
+}
+```
+
+在LitPassFragment的末尾将发射光添加到最终颜色中。
+
+```
+	float3 color = GetLighting(surface, brdf, gi);
+	color += GetEmission(input.baseUV);
+	return float4(color, surface.alpha);
+```
+
+还要在UnlitInput中添加一个GetEmission函数。在这种情况下，我们只是将它设置为GetBase的代理。因此，如果烘焙一个不受照明影响的物体，它会发出其全部颜色。
+
+```
+float3 GetEmission (float2 baseUV) {
+	return GetBase(baseUV).rgb;
+}
+```
+
+为了使不受照明影响的材质能够发出非常明亮的光，我们可以将HDR属性添加到Unlit的基础颜色属性中。
+
+```
+		[HDR] _BaseColor("Color", Color) = (1.0, 1.0, 1.0, 1.0)
+```
+
+最后，让我们将发射颜色添加到PerObjectMaterialProperties中。在这种情况下，我们可以通过给配置字段添加ColorUsage属性来允许HDR输入。我们必须传递给它两个布尔值。第一个指示是否需要显示alpha通道，而这对我们来说是不需要的。第二个指示是否允许HDR值。
+
+```
+	static int
+		baseColorId = Shader.PropertyToID("_BaseColor"),
+		cutoffId = Shader.PropertyToID("_Cutoff"),
+		metallicId = Shader.PropertyToID("_Metallic"),
+		smoothnessId = Shader.PropertyToID("_Smoothness"),
+		emissionColorId = Shader.PropertyToID("_EmissionColor");
+
+	…
+
+	[SerializeField, ColorUsage(false, true)]
+	Color emissionColor = Color.black;
+
+	…
+
+	void OnValidate () {
+		…
+		block.SetColor(emissionColorId, emissionColor);
+		GetComponent<Renderer>().SetPropertyBlock(block);
+	}
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/emissive-surfaces/per-object-emission.png)
+
+我在场景中添加了一些小的发光立方体。我让它们对全局光照产生影响，并且在光照图中将它们的比例加倍，以避免关于重叠UV坐标的警告。当顶点在光照贴图中过于接近，因此它们必须共享相同的纹理单元时，就会出现这种情况。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/emissive-surfaces/emissive-objects.png)
+
+### Baked Emission
+
+发光光线是通过单独的通道进行烘焙的。当unity_MetaFragmentControl的Y标志被设置时，MetaPassFragment应该返回发出的光线，同样将A分量设置为1。
+
+```
+	if (unity_MetaFragmentControl.x) {
+		…
+	}
+	else if (unity_MetaFragmentControl.y) {
+		meta = float4(GetEmission(input.baseUV), 1.0);
+	}
+```
+
+但这不会自动发生。我们必须启用每个材质的发光烘焙。我们可以通过在PerObjectMaterialProperties.OnGUI中在编辑器中调用LightmapEmissionProperty来显示此配置选项。
+
+```
+	public override void OnGUI (
+		MaterialEditor materialEditor, MaterialProperty[] properties
+	) {
+		EditorGUI.BeginChangeCheck();
+		base.OnGUI(materialEditor, properties);
+		editor = materialEditor;
+		materials = materialEditor.targets;
+		this.properties = properties;
+
+		BakedEmission();
+
+		…
+	}
+
+	void BakedEmission () {
+		editor.LightmapEmissionProperty();
+	}
+```
+
+这会显示一个全局光照的下拉菜单，初始设置为"None"。尽管它的名称如此，但它只影响发光烘焙。将其更改为"Baked"会告诉光照映射器为发出的光运行一个单独的通道。还有一个"Realtime"选项，但它已被弃用。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/emissive-surfaces/emission-set-to-baked.png)
+
+这仍然不起作用，因为Unity在烘焙时会极力避免使用单独的发射通道。如果材质的发射为零，则会被忽略。然而，这并没有考虑到每个物体的材质属性。我们可以通过在发射模式更改时，将所有选定材质的globalIlluminationFlags属性的默认MaterialGlobalIlluminationFlags.EmissiveIsBlack标志禁用来覆盖此行为。这意味着您只有在需要时才应启用"Baked"选项。
+
+```
+	void BakedEmission () {
+		EditorGUI.BeginChangeCheck();
+		editor.LightmapEmissionProperty();
+		if (EditorGUI.EndChangeCheck()) {
+			foreach (Material m in editor.targets) {
+				m.globalIlluminationFlags &=
+					~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+			}
+		}
+	}
+```
+
+![with](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/emissive-surfaces/baked-emission-with-light.png)
+
+![without](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/emissive-surfaces/baked-emission-without-light.png)
+
+## Baked Transparency
+
+也可以烘焙透明物体，但需要额外的努力
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/baked-transparency/semitransparent-ceiling.png)
+
+### Hard-Coded Properties
+
+很遗憾，Unity的光照映射器在处理透明度时有一种固定的方法。它根据材质的队列来确定它是不透明的、裁剪的还是透明的。然后通过将_MainTex和_Color属性的alpha分量相乘来确定透明度，使用_Cutoff属性进行alpha裁剪。我们的着色器具有第三个属性，但缺少前两个属性。目前唯一使此功能正常工作的方法是将所需的属性添加到我们的着色器中，并给予它们HideInInspector属性，这样它们就不会显示在检查器中。Unity的SRP着色器也必须解决相同的问题。
+
+### Copying Properties
+
+我们必须确保_MainTex属性指向与_BaseMap相同的纹理，并使用相同的UV变换。两个颜色属性也必须相同。我们可以在CustomShaderGUI.OnGUI的末尾调用一个新的CopyLightMappingProperties方法，如果有更改发生的话。如果相关属性存在，则复制它们的值。
+
+```
+	public override void OnGUI (
+		MaterialEditor materialEditor, MaterialProperty[] properties
+	) {
+		…
+
+		if (EditorGUI.EndChangeCheck()) {
+			SetShadowCasterPass();
+			CopyLightMappingProperties();
+		}
+	}
+
+	void CopyLightMappingProperties () {
+		MaterialProperty mainTex = FindProperty("_MainTex", properties, false);
+		MaterialProperty baseMap = FindProperty("_BaseMap", properties, false);
+		if (mainTex != null && baseMap != null) {
+			mainTex.textureValue = baseMap.textureValue;
+			mainTex.textureScaleAndOffset = baseMap.textureScaleAndOffset;
+		}
+		MaterialProperty color = FindProperty("_Color", properties, false);
+		MaterialProperty baseColor =
+			FindProperty("_BaseColor", properties, false);
+		if (color != null && baseColor != null) {
+			color.colorValue = baseColor.colorValue;
+		}
+	}
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/baked-transparency/transparent-baked.png)
+
+这对于裁剪材质也适用。虽然是可能的，但在MetaPassFragment中裁剪片段并不是必需的，因为透明度是单独处理的。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/baked-transparency/cutout-baked.png)
+
+不幸的是，这意味着烘焙的透明度只能依赖于单一的纹理、颜色和cutoff属性。此外，光照映射器只考虑材质的属性，不会考虑每个实例的属性。
+
+## Mesh Ball
+
+我们结束前，为MeshBall生成的实例添加全局光照支持。由于它的实例是在播放模式下生成的，无法进行烘焙，但通过一些努力，它们可以通过光探头接收到烘焙的光照。![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/mesh-ball/unlit.png)
+
+### Light Probes
+
+我们通过调用一个需要五个额外参数的变体DrawMeshInstanced方法来指示使用光探头。首先是阴影投射模式，我们希望它处于开启状态。接下来是实例是否应该投射阴影，我们希望是。接下来是层级，我们只使用默认值零。然后，我们必须提供一个摄像机，实例应该对其可见。传递null意味着它们应该对所有摄像机进行渲染。最后，我们可以设置光探头模式。我们必须使用LightProbeUsage.CustomProvided，因为没有单一的位置可以用于混合探头。
+
+```
+using UnityEngine;
+using UnityEngine.Rendering;
+
+public class MeshBall : MonoBehaviour {
+	
+	…
+	
+	void Update () {
+		if (block == null) {
+			block = new MaterialPropertyBlock();
+			block.SetVectorArray(baseColorId, baseColors);
+			block.SetFloatArray(metallicId, metallic);
+			block.SetFloatArray(smoothnessId, smoothness);
+		}
+		Graphics.DrawMeshInstanced(
+			mesh, 0, material, matrices, 1023, block,
+			ShadowCastingMode.On, true, 0, null, LightProbeUsage.CustomProvided
+		);
+	}
+```
+
+我们必须手动为所有实例生成插值的光探头，并将它们添加到材质属性块中。这意味着在配置块时需要访问实例位置。我们可以通过获取其转换矩阵的最后一列来检索它们，并将它们存储在一个临时数组中。
+
+```
+		if (block == null) {
+			block = new MaterialPropertyBlock();
+			block.SetVectorArray(baseColorId, baseColors);
+			block.SetFloatArray(metallicId, metallic);
+			block.SetFloatArray(smoothnessId, smoothness);
+
+			var positions = new Vector3[1023];
+			for (int i = 0; i < matrices.Length; i++) {
+				positions[i] = matrices[i].GetColumn(3);
+			}
+		}
+```
+
+光探头必须通过一个SphericalHarmonicsL2数组提供。通过使用位置和光探头数组作为参数，调用LightProbes.CalculateInterpolatedLightAndOcclusionProbes来填充它。还有一个用于遮挡的第三个参数，我们将使用null。
+
+```
+			for (int i = 0; i < matrices.Length; i++) {
+				positions[i] = matrices[i].GetColumn(3);
+			}
+			var lightProbes = new SphericalHarmonicsL2[1023];
+			LightProbes.CalculateInterpolatedLightAndOcclusionProbes(
+				positions, lightProbes, null
+			);
+```
+
+之后，我们可以通过CopySHCoefficientArraysFrom将光探头复制到块中。
+
+```
+			LightProbes.CalculateInterpolatedLightAndOcclusionProbes(
+				positions, lightProbes, null
+			);
+			block.CopySHCoefficientArraysFrom(lightProbes);
+```
+
+### LPPV
+
+
+另一种方法是使用LPPV（Light Probe Proxy Volume）。考虑到实例都存在于一个紧密的空间中，这是有道理的。这使我们不必计算和存储插值的光探头。此外，它使得能够在不必每帧都提供新的光探头数据的情况下，对实例位置进行动画处理，只要它们保持在卷内。
+
+添加一个LightProbeProxyVolume配置字段。如果正在使用它，就不要将光探头数据添加到块中。然后将LightProbeUsage.UseProxyVolume传递给DrawMeshInstanced，而不是LightProbeUsage.CustomProvided。我们始终可以将卷作为附加参数提供，即使它为null并且没有使用。
+
+```
+	[SerializeField]
+	LightProbeProxyVolume lightProbeVolume = null;
+	
+	…
+
+	void Update () {
+		if (block == null) {
+			…
+
+			if (!lightProbeVolume) {
+				var positions = new Vector3[1023];
+				…
+				block.CopySHCoefficientArraysFrom(lightProbes);
+			}
+		}
+		Graphics.DrawMeshInstanced(
+			mesh, 0, material, matrices, 1023, block,
+			ShadowCastingMode.On, true, 0, null,
+			lightProbeVolume ?
+				LightProbeUsage.UseProxyVolume : LightProbeUsage.CustomProvided,
+			lightProbeVolume
+		);
+	}
+```
+
+您可以将LPPV组件添加到网格球上，或将其放在其他位置。可以使用自定义边界模式来定义卷所占据的世界空间区域。
+
+![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/mesh-ball/lppv-inspector.png)
+
+![scene](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/mesh-ball/lppv-scene.png)
