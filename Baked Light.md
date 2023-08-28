@@ -249,11 +249,11 @@ SampleSingleLightmap函数需要更多的参数。首先，我们必须将纹理
 
 ## Light Probes
 
-动态物体不会影响烘培全局光照，但可以通过光探头受到其影响。光探头是场景中的一个点，通过三阶多项式（具体而言是L2球谐函数）来近似所有传入光线的烘培结果。光探头分布在场景周围，Unity会在物体之间进行插值，以得出它们位置的最终光照近似值。
+动态物体不会影响烘培全局光照，但可以通过Light Probes受到其影响。Light Probes是场景中的一个点，通过三阶多项式（具体而言是L2球谐函数）来近似所有传入光线的烘培结果。Light Probes分布在场景周围，Unity会在物体之间进行插值，以得出它们位置的最终光照近似值。
 
 ### Light Probe Group
 
-通过在场景中创建光探头组（GameObject / Light / Light Probe Group），可以向场景添加光探头。这将创建一个带有LightProbeGroup组件的游戏对象，默认情况下它包含六个呈立方体形状排列的探头。当启用“Edit Light Probes”时，您可以像操作游戏对象一样移动、复制和删除单个探头。
+通过在场景中创建Light Probes组（GameObject / Light / Light Probe Group），可以向场景添加Light Probes。这将创建一个带有LightProbeGroup组件的游戏对象，默认情况下它包含六个呈立方体形状排列的探头。当启用“Edit Light Probes”时，您可以像操作游戏对象一样移动、复制和删除单个探头。
 
 ![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-editing-inspector.png)
 
@@ -265,13 +265,13 @@ SampleSingleLightmap函数需要更多的参数。首先，我们必须将纹理
 
 ![scene](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-selected-scene.png)
 
-放置光探头的位置取决于场景。首先，只有在动态物体将出现的地方才需要它们。其次，在光照发生变化的地方放置它们。每个探头都是插值的端点，所以将它们放在光照过渡的周围。第三，不要将它们放在烘培几何体内，因为它们会变成黑色。最后，插值会穿过物体，因此如果墙的两侧光照不同，请将探头靠近墙的两侧。这样，没有物体会在两侧之间插值。除此之外，您需要进行实验来找到最佳位置。
+放置Light Probes的位置取决于场景。首先，**只有在动态物体将出现的地方才需要它们**。其次**，在光照发生变化的地方放置它们**。每个探头都是插值的端点，所以将它们放在光照过渡的周围。第三，**不要将它们放在烘培几何体内**，因为它们会变成黑色。最后，插值会穿过物体，因此如果墙的两侧光照不同，请将探头靠近墙的两侧。这样，没有物体会在两侧之间插值。除此之外，您需要进行实验来找到最佳位置。
 
 ![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/light-probes-all.png)
 
 ### Sampling Probes
 
-插值的光探头数据必须针对每个物体传递到GPU。我们需要告诉Unity这样做，这次是通过PerObjectData.LightProbe而不是PerObjectData.Lightmaps来实现。我们需要同时启用这两个特性标志，因此可以使用布尔的“或”运算符将它们组合起来。
+插值的Light Probes数据必须针对每个物体传递到GPU。我们需要告诉Unity这样做，这次是通过PerObjectData.LightProbe而不是PerObjectData.Lightmaps来实现。我们需要同时启用这两个特性标志，因此可以使用布尔的“或”运算符将它们组合起来。
 
 ```
 perObjectData = PerObjectData.Lightmaps | PerObjectData.LightProbe
@@ -293,7 +293,7 @@ CBUFFER_START(UnityPerDraw)
 CBUFFER_END
 ```
 
-在全局光照（GI）中，我们通过一个新的SampleLightProbe函数对光探头进行采样。我们需要一个方向来进行采样，所以将世界空间的表面参数传递给它。
+在全局光照（GI）中，我们通过一个新的SampleLightProbe函数对Light Probes进行采样。我们需要一个方向来进行采样，所以将世界空间的表面参数传递给它。
 
 如果此物体正在使用光照贴图，则返回零。否则返回零和SampleSH9中的最大值。该函数需要探头数据和法线向量作为参数。探头数据必须以系数数组的形式提供。
 
@@ -315,7 +315,7 @@ float3 SampleLightProbe (Surface surfaceWS) {
 }
 ```
 
-向GetGI添加一个表面参数，并使其将光探头样本添加到漫反射光中。
+向GetGI添加一个表面参数，并使其将Light Probes样本添加到漫反射光中。
 
 ```
 GI GetGI (float2 lightMapUV, Surface surfaceWS) {
@@ -335,12 +335,12 @@ Finally, pass the surface to it in `LitPassFragment`.
 
 ### Light Probe Proxy Volumes
 
-光探头适用于相对较小的动态物体，但由于光照是基于单个点的，所以对于较大的物体效果不佳。例如，我在场景中添加了两个拉伸的立方体。由于它们的位置位于暗区域内，这些立方体是均匀暗淡的，尽管显然这与实际光照不符合。
+Light Probes适用于相对较小的动态物体，但由于光照是基于单个点的，所以对于较大的物体效果不佳。例如，我在场景中添加了两个拉伸的立方体。由于它们的位置位于暗区域内，这些立方体是均匀暗淡的，尽管显然这与实际光照不符合。
 
 ![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/light-probes/large-objects-single-probe.png)
 
 
-我们可以通过使用光探头代理体积（Light Probe Proxy Volume，简称LPPV）来解决这个限制。最简单的方法是为每个立方体添加一个LightProbeProxyVolume组件，然后将它们的Light Probes模式设置为使用代理体积。
+我们可以通过使用Light Probes代理体积（Light Probe Proxy Volume，简称LPPV）来解决这个限制。最简单的方法是为每个立方体添加一个LightProbeProxyVolume组件，然后将它们的Light Probes模式设置为使用代理体积。
 
 这些体积可以以多种方式进行配置。在这种情况下，我使用了自定义分辨率模式，在立方体的边缘放置了子探头，使它们可见。
 
@@ -378,7 +378,7 @@ TEXTURE3D_FLOAT(unity_ProbeVolumeSH);
 SAMPLER(samplerunity_ProbeVolumeSH);
 ```
 
-是使用LPPV还是插值的光探头是通过unity_ProbeVolumeParams的第一个分量进行通信的。如果它被设置了，我们就必须通过SampleProbeVolumeSH4函数对体积进行采样。我们需要将纹理和采样器传递给它，然后是世界位置和法线。之后是矩阵，随后是unity_ProbeVolumeParams的Y和Z分量，然后是min和size-inv数据的XYZ部分。
+是使用LPPV还是插值的Light Probes是通过unity_ProbeVolumeParams的第一个分量进行通信的。如果它被设置了，我们就必须通过SampleProbeVolumeSH4函数对体积进行采样。我们需要将纹理和采样器传递给它，然后是世界位置和法线。之后是矩阵，随后是unity_ProbeVolumeParams的Y和Z分量，然后是min和size-inv数据的XYZ部分。
 
 ```
 		if (unity_ProbeVolumeParams.x) {
@@ -853,11 +853,11 @@ float3 GetEmission (float2 baseUV) {
 
 ## Mesh Ball
 
-我们结束前，为MeshBall生成的实例添加全局光照支持。由于它的实例是在播放模式下生成的，无法进行烘焙，但通过一些努力，它们可以通过光探头接收到烘焙的光照。![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/mesh-ball/unlit.png)
+我们结束前，为MeshBall生成的实例添加全局光照支持。由于它的实例是在播放模式下生成的，无法进行烘焙，但通过一些努力，它们可以通过Light Probes接收到烘焙的光照。![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/mesh-ball/unlit.png)
 
 ### Light Probes
 
-我们通过调用一个需要五个额外参数的变体DrawMeshInstanced方法来指示使用光探头。首先是阴影投射模式，我们希望它处于开启状态。接下来是实例是否应该投射阴影，我们希望是。接下来是层级，我们只使用默认值零。然后，我们必须提供一个摄像机，实例应该对其可见。传递null意味着它们应该对所有摄像机进行渲染。最后，我们可以设置光探头模式。我们必须使用LightProbeUsage.CustomProvided，因为没有单一的位置可以用于混合探头。
+我们通过调用一个需要五个额外参数的变体DrawMeshInstanced方法来指示使用Light Probes。首先是阴影投射模式，我们希望它处于开启状态。接下来是实例是否应该投射阴影，我们希望是。接下来是层级，我们只使用默认值零。然后，我们必须提供一个摄像机，实例应该对其可见。传递null意味着它们应该对所有摄像机进行渲染。最后，我们可以设置Light Probes模式。我们必须使用LightProbeUsage.CustomProvided，因为没有单一的位置可以用于混合探头。
 
 ```
 using UnityEngine;
@@ -881,7 +881,7 @@ public class MeshBall : MonoBehaviour {
 	}
 ```
 
-我们必须手动为所有实例生成插值的光探头，并将它们添加到材质属性块中。这意味着在配置块时需要访问实例位置。我们可以通过获取其转换矩阵的最后一列来检索它们，并将它们存储在一个临时数组中。
+我们必须手动为所有实例生成插值的Light Probes，并将它们添加到材质属性块中。这意味着在配置块时需要访问实例位置。我们可以通过获取其转换矩阵的最后一列来检索它们，并将它们存储在一个临时数组中。
 
 ```
 		if (block == null) {
@@ -897,7 +897,7 @@ public class MeshBall : MonoBehaviour {
 		}
 ```
 
-光探头必须通过一个SphericalHarmonicsL2数组提供。通过使用位置和光探头数组作为参数，调用LightProbes.CalculateInterpolatedLightAndOcclusionProbes来填充它。还有一个用于遮挡的第三个参数，我们将使用null。
+Light Probes必须通过一个SphericalHarmonicsL2数组提供。通过使用位置和Light Probes数组作为参数，调用LightProbes.CalculateInterpolatedLightAndOcclusionProbes来填充它。还有一个用于遮挡的第三个参数，我们将使用null。
 
 ```
 			for (int i = 0; i < matrices.Length; i++) {
@@ -909,7 +909,7 @@ public class MeshBall : MonoBehaviour {
 			);
 ```
 
-之后，我们可以通过CopySHCoefficientArraysFrom将光探头复制到块中。
+之后，我们可以通过CopySHCoefficientArraysFrom将Light Probes复制到块中。
 
 ```
 			LightProbes.CalculateInterpolatedLightAndOcclusionProbes(
@@ -921,9 +921,9 @@ public class MeshBall : MonoBehaviour {
 ### LPPV
 
 
-另一种方法是使用LPPV（Light Probe Proxy Volume）。考虑到实例都存在于一个紧密的空间中，这是有道理的。这使我们不必计算和存储插值的光探头。此外，它使得能够在不必每帧都提供新的光探头数据的情况下，对实例位置进行动画处理，只要它们保持在卷内。
+另一种方法是使用LPPV（Light Probe Proxy Volume）。考虑到实例都存在于一个紧密的空间中，这是有道理的。这使我们不必计算和存储插值的Light Probes。此外，它使得能够在不必每帧都提供新的Light Probes数据的情况下，对实例位置进行动画处理，只要它们保持在卷内。
 
-添加一个LightProbeProxyVolume配置字段。如果正在使用它，就不要将光探头数据添加到块中。然后将LightProbeUsage.UseProxyVolume传递给DrawMeshInstanced，而不是LightProbeUsage.CustomProvided。我们始终可以将卷作为附加参数提供，即使它为null并且没有使用。
+添加一个LightProbeProxyVolume配置字段。如果正在使用它，就不要将Light Probes数据添加到块中。然后将LightProbeUsage.UseProxyVolume传递给DrawMeshInstanced，而不是LightProbeUsage.CustomProvided。我们始终可以将卷作为附加参数提供，即使它为null并且没有使用。
 
 ```
 	[SerializeField]

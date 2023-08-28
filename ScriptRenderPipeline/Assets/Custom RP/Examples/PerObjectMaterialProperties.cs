@@ -7,6 +7,7 @@ public class PerObjectMaterialProperties : MonoBehaviour
     static int cutOffId = Shader.PropertyToID("_Cutoff");
     static int metallicId = Shader.PropertyToID("_Metallic");
     static int smoothnessId = Shader.PropertyToID("_Smoothness");
+    static int emissionColorId = Shader.PropertyToID("_EmissionColor");
     // Start is called before the first frame update
 
     [SerializeField]
@@ -16,6 +17,9 @@ public class PerObjectMaterialProperties : MonoBehaviour
     float cutoff = 0.5f, metallic = 0.5f, smoothness = 0.5f;
 
     static MaterialPropertyBlock block;
+
+    [SerializeField, ColorUsage(false, true)]
+    Color emissionColor = Color.black;
 
     void Awake()
     {
@@ -33,7 +37,7 @@ public class PerObjectMaterialProperties : MonoBehaviour
         block.SetColor(baseColorId, baseColor);
         block.SetFloat(metallicId, metallic);
         block.SetFloat(smoothnessId, smoothness);
-
+        block.SetColor(emissionColorId, emissionColor);
         GetComponent<Renderer>().SetPropertyBlock(block);
     }
 
