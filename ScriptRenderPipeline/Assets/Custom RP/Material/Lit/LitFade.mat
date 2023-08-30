@@ -12,6 +12,7 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
+  - _PREMULTIPLY_ALPHA
   - _RECEIVE_SHADOWS
   - _SHADOWS_CLIP
   m_InvalidKeywords: []
@@ -79,13 +80,13 @@ Material:
     - _Mode: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.02
-    - _PremulAlpha: 0
+    - _PremulAlpha: 1
     - _ReceiveShadows: 1
     - _Shadows: 1
     - _Smoothness: 0.684
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
-    - _SrcBlend: 5
+    - _SrcBlend: 1
     - _UVSec: 0
     - _ZWrite: 0
     m_Colors:
