@@ -142,3 +142,56 @@ void ShadowCasterPassFragment (Varyings input) {
 默认的动画持续时间是半秒，可以通过设置静态属性`LODGroup.crossFadeAnimationDuration`来更改所有组的动画持续时间。然而，在不处于播放模式时，Unity 2022中的过渡速度会更快。这是因为在编辑模式下，Unity通常会采用更快的速度以提高开发效率，而在播放模式下才会采用实际的持续时间来模拟淡入淡出效果。这一行为确保了在编辑时可以更快地预览效果，而在播放时才会以实际的速度呈现。
 
 ## Reflections
+
+环境的镜面反射是增加场景细节和逼真度的另一现象，镜子是最明显的例子，但我们目前还不支持。这对于金属表面尤为重要，目前它们大多是黑色的。为了使这一点更加明显，您可以向“Baked Light”场景中添加更多的金属球体，它们具有不同的颜色和光滑度属性。这将帮助您在场景中突出金属材质的效果。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/without-reflections.png)
+
+### Indirect BRDF
+
+我们已经支持漫反射全局光照，这取决于BRDF的漫反射颜色。现在我们还要添加镜面全局光照，这也依赖于BRDF。所以让我们在BRDF中添加一个IndirectBRDF函数，它需要表面和BRDF参数，以及从全局光照中获取的漫反射和镜面颜色。最初，让它只返回反射的漫反射光。这是一个良好的起点，可以在此基础上继续添加镜面反射的支持。
+
+```
+float3 IndirectBRDF (
+	Surface surface, BRDF brdf, float3 diffuse, float3 specular
+) {
+    return diffuse * brdf.diffuse;
+}
+```
+
+添加镜面反射开始时类似：只需包括乘以BRDF的镜面颜色的镜面GI即可。这将帮助您逐步实现镜面反射的支持，使场景更加逼真。
+
+```
+	float3 reflection = specular * brdf.specular;
+
+    return diffuse * brdf.diffuse + reflection;
+```
+
+正确，粗糙度确实会散射反射光线，因此它应该减小我们最终看到的镜面反射。为实现这一效果，我们可以通过将镜面GI除以粗糙度的平方加一来实现。因此，低粗糙度值不会产生太大影响，而最大粗糙度将反射减半。这将考虑到材质的粗糙度，使镜面反射看起来更加自然。
+
+```
+	float3 reflection = specular * brdf.specular;
+	reflection /= brdf.roughness * brdf.roughness + 1.0;
+```
+
+在GetLighting中调用IndirectBRDF来获取间接的BRDF光照，而不是直接计算漫反射间接光照。一开始，可以使用白色作为镜面GI颜色，以确保镜面反射的效果。这将有助于实现镜面全局光照。
+
+```
+float3 GetLighting (Surface surfaceWS, BRDF brdf, GI gi) {
+	ShadowData shadowData = GetShadowData(surfaceWS);
+	shadowData.shadowMask = gi.shadowMask;
+	
+	float3 color = IndirectBRDF(surfaceWS, brdf, gi.diffuse, 1.0);
+	for (int i = 0; i < GetDirectionalLightCount(); i++) {
+		Light light = GetDirectionalLight(i, surfaceWS, shadowData);
+		color += GetLighting(surfaceWS, brdf, light);
+	}
+	return color;
+}
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/reflecting-white-environment.png)
+
+一切都变得至少亮了一点，因为我们添加了之前缺少的光照。对于金属表面的变化是显著的：它们的颜色现在明亮而明显。
+
+### Sampling the Environment
