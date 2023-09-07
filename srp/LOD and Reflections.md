@@ -195,3 +195,271 @@ float3 GetLighting (Surface surfaceWS, BRDF brdf, GI gi) {
 一切都变得至少亮了一点，因为我们添加了之前缺少的光照。对于金属表面的变化是显著的：它们的颜色现在明亮而明显。
 
 ### Sampling the Environment
+
+镜面反射会镜像环境，通常默认为天空盒（skybox）。它作为一个立方体贴图纹理可通过unity_SpecCube0获得。在GI（全局光照）中与其采样状态一起声明，这次使用TEXTURECUBE宏。
+
+```
+TEXTURECUBE(unity_SpecCube0);
+SAMPLER(samplerunity_SpecCube0);
+```
+
+然后，添加一个SampleEnvironment函数，该函数带有世界坐标表面参数，采样纹理并返回其RGB分量。我们通过SAMPLE_TEXTURECUBE_LOD宏来采样立方体贴图，该宏接受地图、采样器状态、UVW坐标和Mip级别作为参数。由于它是一个立方体贴图，我们需要使用3D纹理坐标，因此使用UVW。我们始终从使用最高Mip级别开始，因此我们采样全分辨率纹理
+
+```
+float3 SampleEnvironment (Surface surfaceWS) {
+	float3 uvw = 0.0;
+	float4 environment = SAMPLE_TEXTURECUBE_LOD(
+		unity_SpecCube0, samplerunity_SpecCube0, uvw, 0.0
+	);
+	return environment.rgb;
+}
+```
+
+采样立方体贴图是根据一个方向进行的，而在这种情况下，该方向是从相机到表面反射的视线方向。我们通过使用负视线方向和表面法线作为参数来调用reflect函数来获得它。
+
+```
+	float3 uvw = reflect(-surfaceWS.viewDirection, surfaceWS.normal);
+```
+
+接下来，在GI中添加一个镜面颜色，并将采样到的环境存储在GetGI函数中
+
+```
+struct GI {
+	float3 diffuse;
+	float3 specular;
+	ShadowMask shadowMask;
+};
+
+…
+
+GI GetGI (float2 lightMapUV, Surface surfaceWS) {
+	GI gi;
+	gi.diffuse = SampleLightMap(lightMapUV) + SampleLightProbe(surfaceWS);
+	gi.specular = SampleEnvironment(surfaceWS);
+	…
+}
+```
+
+现在我们可以在GetLighting函数中将正确的颜色传递给IndirectBRDF
+
+```
+	float3 color = IndirectBRDF(surfaceWS, brdf, gi.diffuse, gi.specular);
+```
+
+最后，要使其工作，我们必须在CameraRenderer.DrawVisibleGeometry中设置每个对象的数据时，告诉Unity包括反射探针。
+
+```
+			perObjectData =
+				PerObjectData.ReflectionProbes |
+				PerObjectData.Lightmaps | PerObjectData.ShadowMask |
+				PerObjectData.LightProbe | PerObjectData.OcclusionProbe |
+				PerObjectData.LightProbeProxyVolume |
+				PerObjectData.OcclusionProbeProxyVolume
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/reflecting-environment.png)
+
+表面现在反射环境。对于金属表面来说这是显而易见的，但其他表面也反射它。由于它只是天空盒，没有其他东西被反射，但我们稍后会研究这个问题。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/environment-probe.png)
+
+### Rough Reflections
+
+由于粗糙度会散射镜面反射，它不仅会减弱其强度，还会使其模糊，就好像它失焦了。Unity通过在较低的Mip级别中存储环境贴图的模糊版本来近似这种效果。要访问正确的Mip级别，我们需要知道感知粗糙度，所以让我们将其添加到BRDF结构中。
+
+```
+struct BRDF {
+	…
+	float perceptualRoughness;
+};
+
+…
+
+BRDF GetBRDF (Surface surface, bool applyAlphaToDiffuse = false) {
+	…
+
+	brdf.perceptualRoughness =
+		PerceptualSmoothnessToPerceptualRoughness(surface.smoothness);
+	brdf.roughness = PerceptualRoughnessToRoughness(brdf.perceptualRoughness);
+	return brdf;
+}
+```
+
+我们可以依靠PerceptualRoughnessToMipmapLevel函数来计算给定感知粗糙度的正确Mip级别。它在Core RP Library的ImageBasedLighting文件中定义。这需要我们向SampleEnvironment添加一个BRDF参数。
+
+```
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+…
+
+float3 SampleEnvironment (Surface surfaceWS, BRDF brdf) {
+	float3 uvw = reflect(-surfaceWS.viewDirection, surfaceWS.normal);
+	float mip = PerceptualRoughnessToMipmapLevel(brdf.perceptualRoughness);
+	float4 environment = SAMPLE_TEXTURECUBE_LOD(
+		unity_SpecCube0, samplerunity_SpecCube0, uvw, mip
+	);
+	return environment.rgb;
+}
+```
+
+在GetGI函数中也添加所需的参数，并将其传递。
+
+```
+GI GetGI (float2 lightMapUV, Surface surfaceWS, BRDF brdf) {
+	GI gi;
+	gi.diffuse = SampleLightMap(lightMapUV) + SampleLightProbe(surfaceWS);
+	gi.specular = SampleEnvironment(surfaceWS, brdf);
+	…
+}
+```
+
+Finally, supply it in `LitPassFragment`.
+
+```
+	GI gi = GetGI(GI_FRAGMENT_DATA(input), surface, brdf);
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/rough-reflections.png)
+
+### Fresnel Reflection
+
+
+所有表面的一个特性是，当以极端角度观察时，它们开始变得像完美的镜子，因为光线在它们上面反射时几乎没有受到影响。这现象被称为菲涅尔反射。实际上，它比这更复杂，因为它涉及到不同介质边界处的光波传输和反射，但我们只是使用Universal RP使用的同样近似，即假设为空气-固体边界。
+
+我们使用Schlick的近似变种来处理菲涅尔反射。在理想情况下，它将镜面BRDF颜色替换为纯白色，但粗糙度可以阻止反射出现。我们通过将表面的光滑度和反射性相加来得到最终颜色，最大值为1。由于它是灰度的，我们可以只向BRDF添加一个值来表示它。
+
+```
+struct BRDF {
+	…
+	float fresnel;
+};
+
+…
+
+BRDF GetBRDF (Surface surface, bool applyAlphaToDiffuse = false) {
+	…
+	
+	brdf.fresnel = saturate(surface.smoothness + 1.0 - oneMinusReflectivity);
+	return brdf;
+}
+```
+
+在IndirectBRDF函数中，我们通过将表面法线和视线方向的点积取1并将结果的四次方来确定菲涅尔效应的强度。在这里，我们可以使用Core RP Library中方便的Pow4函数。
+
+```
+	float fresnelStrength =
+		Pow4(1.0 - saturate(dot(surface.normal, surface.viewDirection)));
+	float3 reflection = specular * brdf.specular;
+```
+
+然后，根据强度在BRDF的镜面和菲涅尔颜色之间进行插值，然后使用结果来着色环境反射。
+
+```
+	float3 reflection =
+		specular * lerp(brdf.specular, brdf.fresnel, fresnelStrength);
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/fresnel-reflections.png)
+
+### Fresnel Slider
+
+菲涅尔反射主要在几何体的边缘添加反射效果。当环境贴图与物体背后的颜色匹配时，效果是微妙的，但如果情况不是这样，反射可能会显得奇怪和分散注意力。结构内部球体边缘处的明亮反射就是一个很好的例子。
+
+降低光滑度可以去除菲涅尔反射，但也会使整个表面变得暗淡。此外，在某些情况下，菲涅尔近似不适用，例如在水下。因此，让我们添加一个滑块以在Lit着色器中进行缩放。
+
+```
+		_Metallic ("Metallic", Range(0, 1)) = 0
+		_Smoothness ("Smoothness", Range(0, 1)) = 0.5
+		_Fresnel ("Fresnel", Range(0, 1)) = 1
+```
+
+将其添加到LitInput的UnityPerMaterial缓冲区中，并创建一个用于获取菲涅尔效应的GetFresnel函数。
+
+```
+UNITY_INSTANCING_BUFFER_START(UnityPerMaterial)
+	…
+	UNITY_DEFINE_INSTANCED_PROP(float, _Fresnel)
+UNITY_INSTANCING_BUFFER_END(UnityPerMaterial)
+
+…
+
+float GetFresnel (float2 baseUV) {
+	return UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _Fresnel);
+}
+```
+
+此外，为了保持它们同步，还需要为UnlitInput添加一个虚拟函数。
+
+```
+float GetFresnel (float2 baseUV) {
+	return 0.0;
+}
+```
+
+表面现在有一个用于其菲涅尔强度的字段。
+
+```
+struct Surface {
+	…
+	float smoothness;
+	float fresnelStrength;
+	float dither;
+};
+```
+
+我们在LitPassFragment中将其设置为滑块属性的值。
+
+```
+	surface.smoothness = GetSmoothness(input.baseUV);
+	surface.fresnelStrength = GetFresnel(input.baseUV);
+```
+
+最后，使用它来缩放我们在IndirectBRDF中使用的菲涅尔强度。
+
+https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/adjusting-fresnel-strength.mp4
+
+### Reflection Probes
+
+默认的环境立方体贴图只包含天空盒。要在场景中反射其他内容，我们必须通过GameObject / Light / Reflection Probe向其中添加一个反射探针。这些探针将场景渲染到一个立方体贴图中，从它们的位置开始。因此，只有靠近探针的表面的反射才会看起来更或多或少正确。因此，通常需要在场景中放置多个探针。它们具有Importance和Box Size属性，可用于控制每个探针影响的区域。
+
+![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/reflection-probe-inspector.png)
+
+![cube map](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/reflection-probe-map.png)
+
+默认情况下，探针的类型设置为烘焙（Baked），这意味着它会在构建时渲染一次，并且立方体贴图会在构建中保存。您还可以将其设置为实时（Realtime），以保持立方体贴图与动态场景保持同步。它会像任何其他相机一样渲染，使用我们的渲染管线（RP），为立方体贴图的每个面渲染一次。因此，实时反射探针的性能开销较大。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/reflection-probes.png)
+
+每个对象只使用一个环境探针，但场景中可以有多个探针。因此，您可能需要分割对象以获得可接受的反射效果。例如，用于构建结构的立方体理想情况下应该分割为内部和外部两部分，这样每个部分可以使用不同的反射探针。此外，这意味着反射探针会破坏GPU批处理。不幸的是，网格球根本无法使用反射探针，始终只使用天空盒。
+
+MeshRenderer组件具有Anchor Override选项，可用于微调它们使用的探针，而无需担心包围盒的大小和位置。还有一个Reflection Probes选项，默认设置为Blend Probes。这个想法是Unity允许在两个最佳反射探针之间进行混合。然而，这种模式与SRP批处理器不兼容，因此Unity的其他渲染管线不支持它，我们也不支持。如果您感兴趣，如何混合探针可以在我的2018 SRP教程的Reflections教程中找到解释，但我预计一旦传统渲染管线被移除，这个功能将不复存在。我们将在未来研究其他反射技术。因此，唯一两种可用的模式是Off，它始终使用天空盒，和Simple，它选择最重要的探针。其他模式与Simple完全相同。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/simple-probes.png)
+
+此外，反射探针还有一个选项，可以启用盒子投影模式。这应该改变反射的确定方式，以更好地匹配它们的有限影响区域，但这也不受SRP批处理器支持，因此我们也不支持它。
+
+### Decoding Probes
+
+最后，我们必须确保正确解释立方体贴图中的数据。它可以是HDR或LDR，并且其强度也可以调整。这些设置通过unity_SpecCube0_HDR向量提供，该向量位于UnityPerDraw缓冲区中的unity_ProbesOcclusion之后。
+
+```
+CBUFFER_START(UnityPerDraw)
+	…
+
+	float4 unity_ProbesOcclusion;
+	
+	float4 unity_SpecCube0_HDR;
+	
+	…
+CBUFFER_END
+```
+
+我们通过在SampleEnvironment的末尾使用原始环境数据和设置作为参数调用DecodeHDREnvironment来获取正确的颜色。
+
+```
+float3 SampleEnvironment (Surface surfaceWS, BRDF brdf) {
+	…
+	return DecodeHDREnvironment(environment, unity_SpecCube0_HDR);
+}
+```
