@@ -23,10 +23,17 @@ class Lighting{
 	+ void Setup(ScriptableRenderContext context, CullingResults cullingResults)；
 }
 
+class Shadow{
+	+ void Render()
+	+ void Setup()
+}
+
+
 RenderPipeline *-- CameraRenderer
 CameraRenderer o-- ScriptableRenderContext
 CameraRenderer o-- camera
 CameraRenderer *-- Lighting
+Lighting *-- Shadow
 ```
 
 流程
@@ -39,7 +46,9 @@ void CustomRenderPipeline::Render(ScriptableRenderContext context, Camera[] came
     	Setup(); // 相机属性， clear,
         void Lighting::Setup(ScriptableRenderContext context, CullingResults cullingResults)
         {
+            shadow.Setup(context, cullingResults, shadowSetting);
             // 将Light数据传输到GPU
+		   shadow.Render();
         }
         
         void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing)
@@ -176,4 +185,48 @@ float4 LitPassFragment(Varings input)
     }
 }
 ```
+
+#### 直接光照计算
+
+##### BRDF计算公式
+
+- 漫反射
+
+实际上，一些光线也会反射在介电表面上，这使它们具有高光。非金属的反射率各不相同，但平均值约为0.04。让我们将这个值定义为最小反射率，并添加一个OneMinusReflectivity函数，将范围从0-1调整为0-0.96。
+$$
+oneMinusReflectivity = (1 - MINREFLECTIVITY) - metallic * (1 - MINREFLECTIVITY)
+$$
+
+$$
+brdf.diffuse = surface.color * oneMinusReflectivity
+$$
+
+- Specular
+  $$
+  F0 = lerp(MIN_REFLECTIVITY, surface.color, metallic)
+  $$
+
+  $$
+  Roughness = (1 - smoothness)^2
+  $$
+
+$$
+DirectBRDF = brdf.specular + brdf.diffuse
+$$
+
+
+
+##### 光计算公式
+
+$$
+Li = {surface.normal} \cdot light.direction * shadow * light.color  
+$$
+
+##### 直接光照公式
+
+$$
+ Lo  = Li * DirectBRDF
+$$
+
+#### 环境光计算公式
 

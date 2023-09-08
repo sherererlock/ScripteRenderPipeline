@@ -19,9 +19,13 @@
 #endif
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
 TEXTURE2D(unity_Lightmap);
 SAMPLER(samplerunity_Lightmap);
+
+TEXTURECUBE(unity_SpecCube0);
+SAMPLER(samplerunity_SpecCube0);
 
 TEXTURE3D_FLOAT(unity_ProbeVolumeSH);
 SAMPLER(samplerunity_ProbeVolumeSH);
@@ -29,6 +33,7 @@ SAMPLER(samplerunity_ProbeVolumeSH);
 struct GI
 {
 	float3 diffuse;
+	float3 specular;
 };
 
 float3 SampleLightMap(float2 lightMapUV) {
@@ -72,10 +77,21 @@ float3 SampleLightProbe(Surface surfaceWS) {
 #endif
 }
 
-GI GetGI(float2 lightMapUV, Surface surfaceWS)
+float3 SampleEnvironment(Surface surfaceWS, BRDF brdf) {
+	
+	float3 uvw = reflect(-surfaceWS.viewDirection, surfaceWS.normal);
+	float mip = PerceptualRoughnessToMipmapLevel(brdf.perceptualRoughness);
+	float4 environment = SAMPLE_TEXTURECUBE_LOD(
+		unity_SpecCube0, samplerunity_SpecCube0, uvw, mip
+	);
+	return DecodeHDREnvironment(environment, unity_SpecCube0_HDR);
+}
+
+GI GetGI(float2 lightMapUV, Surface surfaceWS, BRDF brdf)
 {
 	GI gi;
 	gi.diffuse = SampleLightMap(lightMapUV) + SampleLightProbe(surfaceWS);
+	gi.specular = SampleEnvironment(surfaceWS, brdf);
 
 	return gi;
 }

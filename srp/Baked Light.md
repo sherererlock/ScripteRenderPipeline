@@ -505,7 +505,7 @@ And the relevant functions to retrieve shader properties in `LitPassFragment`.
 
 ### Meta Light Mode
 
-在Lit和Unlit着色器中都添加一个新的通道，将LightMode设置为Meta。该通道需要关闭剔除，可以通过添加Cull Off选项来配置。它将使用在一个新的MetaPass.hlsl文件中定义的MetaPassVertex和MetaPassFragment函数。它不需要多重编译指令。
+在Lit和Unlit着色器中都添加一个新的通道，将LightMode设置为Meta。该通道需要**关闭剔除**，可以通过添加Cull Off选项来配置。它将使用在一个新的MetaPass.hlsl文件中定义的MetaPassVertex和MetaPassFragment函数。它不需要多重编译指令。
 
 ```
 		Pass {
@@ -567,7 +567,7 @@ float4 MetaPassFragment (Varyings input) : SV_TARGET {
 #endif
 ```
 
-一旦Unity使用我们自己的元通道重新烘焙场景，所有的间接光照都会消失，因为黑色的表面不会反射任何光线。
+一旦Unity使用我们自己的Meta Pass重新烘焙场景，所有的间接光照都会消失，因为黑色的表面不会反射任何光线。
 
 ![img](https://catlikecoding.com/unity/tutorials/custom-srp/baked-light/meta-pass/no-indirect-light.png)
 
@@ -594,7 +594,7 @@ Varyings MetaPassVertex (Attributes input) {
 }
 ```
 
-我们仍然需要物体空间顶点属性作为输入，因为着色器希望它存在。实际上，似乎除非明确使用Z坐标，否则OpenGL无法工作。我们将使用与Unity自己的元通道相同的虚拟赋值，即input.positionOS.z > 0.0 ? FLT_MIN : 0.0。
+我们仍然需要物体空间顶点属性作为输入，因为着色器希望它存在。实际上，似乎除非明确使用Z坐标，否则OpenGL无法工作。我们将使用与Unity自己的Meta Pass相同的虚拟赋值，即input.positionOS.z > 0.0 ? FLT_MIN : 0.0。
 
 ```
 	input.positionOS.xy =
@@ -604,7 +604,7 @@ Varyings MetaPassVertex (Attributes input) {
 
 ### Diffuse Reflectivity
 
-元通道可以用于生成不同的数据。所请求的内容是通过一个bool4 unity_MetaFragmentControl标志向量进行通信的。
+Meta Pass可以用于生成不同的数据。所请求的内容是通过一个bool4 unity_MetaFragmentControl标志向量进行通信的。
 
 ```
 bool4 unity_MetaFragmentControl;
@@ -624,7 +624,7 @@ bool4 unity_MetaFragmentControl;
 	return meta;
 ```
 
-这足以为反射光着色，但Unity的元通道还会稍微增强结果，方法是加上一半的高光反射率，乘以粗糙度。背后的想法是高度高光但粗糙的材质也会传递一些间接光。
+这足以为反射光着色，但Unity的Meta Pass还会稍微增强结果，方法是加上一半的高光反射率，乘以粗糙度。背后的想法是高度高光但粗糙的材质也会传递一些间接光。
 
 之后，结果会通过使用提供的unity_OneOverOutputBoost和PositivePow方法将其提升为一个幂，并将其限制在unity_MaxOutputValue内进行修改。
 

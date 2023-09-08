@@ -417,6 +417,11 @@ struct Surface {
 
 最后，使用它来缩放我们在IndirectBRDF中使用的菲涅尔强度。
 
+```
+	float fresnelStrength = surface.fresnelStrength *
+		Pow4(1.0 - saturate(dot(surface.normal, surface.viewDirection)));
+```
+
 https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/adjusting-fresnel-strength.mp4
 
 ### Reflection Probes
@@ -431,7 +436,7 @@ https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflect
 
 ![img](https://catlikecoding.com/unity/tutorials/custom-srp/lod-and-reflections/reflections/reflection-probes.png)
 
-每个对象只使用一个环境探针，但场景中可以有多个探针。因此，您可能需要分割对象以获得可接受的反射效果。例如，用于构建结构的立方体理想情况下应该分割为内部和外部两部分，这样每个部分可以使用不同的反射探针。此外，这意味着反射探针会破坏GPU批处理。不幸的是，网格球根本无法使用反射探针，始终只使用天空盒。
+每个对象只使用一个环境探针，但场景中可以有多个探针。因此，您可能需要分割对象以获得可接受的反射效果。例如，用于构建结构的立方体理想情况下应该分割为内部和外部两部分，这样每个部分可以使用不同的反射探针。此外，**这意味着反射探针会破坏GPU批处理**。不幸的是，Mesh Ball根本无法使用反射探针，始终只使用天空盒。
 
 MeshRenderer组件具有Anchor Override选项，可用于微调它们使用的探针，而无需担心包围盒的大小和位置。还有一个Reflection Probes选项，默认设置为Blend Probes。这个想法是Unity允许在两个最佳反射探针之间进行混合。然而，这种模式与SRP批处理器不兼容，因此Unity的其他渲染管线不支持它，我们也不支持。如果您感兴趣，如何混合探针可以在我的2018 SRP教程的Reflections教程中找到解释，但我预计一旦传统渲染管线被移除，这个功能将不复存在。我们将在未来研究其他反射技术。因此，唯一两种可用的模式是Off，它始终使用天空盒，和Simple，它选择最重要的探针。其他模式与Simple完全相同。
 

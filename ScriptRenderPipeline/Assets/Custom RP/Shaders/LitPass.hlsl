@@ -8,7 +8,6 @@
 #include "../ShaderLibrary/GI.hlsl"
 #include "../ShaderLibrary/Lighting.hlsl"
 
-
 struct Attributes
 {
 	float3 positionOS : POSITION;
@@ -65,6 +64,7 @@ float4 LitPassFragment(Varyings input) : SV_TARGET
 	surface.viewDirection = normalize(_WorldSpaceCameraPos - input.positionWS);
 	surface.depth = -TransformWorldToView(input.positionWS).z;
 	surface.dither = InterleavedGradientNoise(input.positionCS.xy, 0);
+	surface.fresnelStrength = GetFresnel(input.baseUV);
 
 	#ifdef _CLIPPING
 	clip(base.a - GetCutoff(input.baseUV));
@@ -76,7 +76,7 @@ float4 LitPassFragment(Varyings input) : SV_TARGET
 	BRDF brdf = GetBRDF(surface);
 	#endif
 
-	GI gi = GetGI(GI_FRAGMENT_DATA(input), surface);
+	GI gi = GetGI(GI_FRAGMENT_DATA(input), surface, brdf);
     float3 color = GetLighting(surface, brdf, gi);
 	color += GetEmission(input.baseUV);
 
