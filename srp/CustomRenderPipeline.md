@@ -230,3 +230,91 @@ $$
 
 #### 环境光计算公式
 
+##### BRDF计算公式
+
+- diffuse与直接光照一样
+
+- Specular
+  $$
+  brdf.fresnel = saturate(surface.smoothness + 1.0 - oneMinusReflectivity)
+  $$
+
+  $$
+  fresnelStrength = surface.fresnelStrength * (1 - normal \cdot viewDirection)^4
+  $$
+
+  $$
+  specular = lerp(brdf.specular, brdf.fresnel, fresnelStrength) /(roughness^2 + 1.0)
+  $$
+
+##### 光照
+
+- diffuse
+
+  静态物体直接采样LightMap，动态物体采样LightProbe，使用球谐光照计算
+
+- specular
+
+  使用Reflection Probe
+
+##### 间接光照
+
+$$
+Lo = gi.diffuse * brdf.diffuse + gi.specular * specular
+$$
+
+------
+
+#### Shader中的Uniform变量结构
+
+- UnityPerMaterial(LitInput)
+
+  ```
+  float4 _BaseMap_ST
+  float4 _BaseColor
+  float4 _EmissionColor
+  float _Cutoff
+  float _Metallic
+  float _Smoothness
+  float _Fresnel
+  ```
+
+- UnityPerDraw(UnityInput)
+
+  ```
+  	float4x4 unity_ObjectToWorld;
+  	float4x4 unity_WorldToObject;
+  	float4 unity_LODFade;
+  	real4 unity_WorldTransformParams;
+  
+  	float4 unity_LightmapST;
+  	float4 unity_DynamicLightmapST;
+  
+  	float4 unity_SHAr;
+  	float4 unity_SHAg;
+  	float4 unity_SHAb;
+  	float4 unity_SHBr;
+  	float4 unity_SHBg;
+  	float4 unity_SHBb;
+  	float4 unity_SHC;
+  
+  	float4 unity_ProbeVolumeParams;
+  	float4x4 unity_ProbeVolumeWorldToObject;
+  	float4 unity_ProbeVolumeSizeInv;
+  	float4 unity_ProbeVolumeMin;
+  
+  	float4 unity_SpecCube0_HDR;
+  ```
+
+- _CustomShadows
+
+  ```
+  	int _CascadeCount;
+  	float4 _ShadowDistanceFade;
+  	float4 _ShadowAtlasSize;
+  	float4 _CullingSpheres[Max_Cascades_Count];
+  	float4 _CascadeData[Max_Cascades_Count];
+  	float4x4 _DirectionalShadowMatrices[Max_Directional_Light_Count * Max_Cascades_Count];
+  ```
+
+  

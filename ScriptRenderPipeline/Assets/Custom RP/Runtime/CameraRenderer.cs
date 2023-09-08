@@ -82,7 +82,7 @@ public partial class CameraRenderer
 		{
 			enableDynamicBatching = useDynamicBatching,
 			enableInstancing = useGPUInstancing,
-			perObjectData = PerObjectData.Lightmaps | PerObjectData.LightProbe | PerObjectData.LightProbeProxyVolume | PerObjectData.ReflectionProbes,
+			perObjectData = PerObjectData.Lightmaps | PerObjectData.ShadowMask | PerObjectData.LightProbe | PerObjectData.OcclusionProbe | PerObjectData.LightProbeProxyVolume | PerObjectData.ReflectionProbes | PerObjectData.OcclusionProbeProxyVolume,
 		};
 
 		drawSettings.SetShaderPassName(1, litShaderTagId);

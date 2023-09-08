@@ -52,6 +52,11 @@ public class Shadow
         "_CASCADE_BLEND_DITHER"
     };
 
+    bool useShadowMask;
+    static string[] shadowMaskKeywords = {
+        "_SHADOW_MASK_DISTANCE"
+    };
+
     public void Setup(ScriptableRenderContext context, CullingResults cullingResults, ShadowSetting shadowSetting)
     {
         this.cullingResults = cullingResults;
@@ -65,6 +70,8 @@ public class Shadow
         buffer.EndSample(bufferName);
         context.ExecuteCommandBuffer(buffer);
         buffer.Clear();
+
+        useShadowMask = false;
     }
 
     public void Render()
@@ -77,6 +84,11 @@ public class Shadow
         {
             buffer.GetTemporaryRT(dirShadowAtlasId, 1, 1, 32, FilterMode.Bilinear, RenderTextureFormat.Shadowmap);
         }
+
+        buffer.BeginSample(bufferName);
+        SetKeywords(shadowMaskKeywords, useShadowMask ? 0 : -1);
+        buffer.EndSample(bufferName);
+        ExecuteBuffer();
     }
 
     void RenderDirectionalShadows()
@@ -226,9 +238,10 @@ public class Shadow
     {
         if (ShadowedDirectionalLightCount >= maxShadowDirectionalLightCount 
             || light.shadows == LightShadows.None 
-            || light.shadowStrength <= 0.0f
-            || !cullingResults.GetShadowCasterBounds(visibleLightIndex, out Bounds b))
+            || light.shadowStrength <= 0.0f)
+             //|| !cullingResults.GetShadowCasterBounds(visibleLightIndex, out Bounds b))
             return Vector3.zero;
+
 
         shadowDirectionalLights[ShadowedDirectionalLightCount] = new ShadowDirectionalLight
         {
@@ -236,6 +249,23 @@ public class Shadow
             slopeScaleBias = light.shadowBias,
             nearPlaneOffset = light.shadowNearPlane
         };
+
+        LightBakingOutput lightBaking = light.bakingOutput;
+        if (
+            lightBaking.lightmapBakeType == LightmapBakeType.Mixed &&
+            lightBaking.mixedLightingMode == MixedLightingMode.Shadowmask
+        )
+        {
+            useShadowMask = true;
+        }
+
+
+        if (!cullingResults.GetShadowCasterBounds(
+            visibleLightIndex, out Bounds b
+        ))
+        {
+            return new Vector3(-light.shadowStrength, 0f, 0f);
+        }
 
         return new Vector3(light.shadowStrength, shadowSetting.directional.cascadeCount * ShadowedDirectionalLightCount++, light.shadowNormalBias) ;
     }
