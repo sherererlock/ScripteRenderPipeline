@@ -4,10 +4,30 @@ Shader "Custom RP/Lit"
     {
         _BaseMap("Texture", 2D) = "white" {}
         _BaseColor("Color", Color) = (1.0, 1.0, 1.0, 1.0)
+
+        [Toggle(_DETAIL_MAP)] _DetailMapToggle("Detail Maps", Float) = 0
+        _DetailAlbedo("Detail Albedo", Range(0, 1)) = 1.0
+        _DetailSmoothness("Detail Smoothness", Range(0, 1)) = 1.0
+        _DetailMap("Detail", 2D) = "linearGrey" {}
+
+        [Toggle(_NORMAL_MAP)] _NormalMapToggle("Normal Map", Float) = 0
+        _NormalScale("Normal Scale", Range(0, 1)) = 1
+        _DetailNormalScale("Detail Normal Scale", Range(0, 1)) = 1
+        [NoScaleOffset] _NormalMap("Normals", 2D) = "bump" {}
+        [NoScaleOffset] _DetailNormalMap("Detail normal", 2D) = "bump" {}
+
+        [Toggle(_MASK_MAP)] _MaskMapToggle("Mask Map", Float) = 0
+        [NoScaleOffset] _MaskMap("Mask", 2D) = "white" {}
+
+        [HDR] _EmissionColor("Emission", Color) = (0.0, 0.0, 0.0, 0.0)
+        [NoScaleOffset] _EmissionMap("Emission", 2D) = "white" {}
+
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
         _Metallic("Metallic", Range(0.0, 1.0)) = 0.5
         _Smoothness("Smothness", Range(0.0, 1.0)) = 0.5
+        _Occlusion("Occlusion", Range(0.0, 1.0)) = 1.0
         _Fresnel("Fresnel", Range(0, 1)) = 1
+
         [Toggle(_CLIPPING)] _Clipping("Alpha Clipping",Float) = 0
         [KeywordEnum(On, Clip, Dither, Off)] _Shadows("Shadows", Float) = 0
         [Toggle(_PREMULTIPLY_ALPHA)] _PremulAlpha("Premultiply Alpha",Float) = 0
@@ -16,9 +36,6 @@ Shader "Custom RP/Lit"
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend("Src Blend", Float) = 1
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend("Dst Blend", Float) = 0
         [Enum(Off, 0, On, 1)] _ZWrite("Z Write", Float) = 1
-
-        [NoScaleOffset] _EmissionMap("Emission", 2D) = "white" {}
-        [HDR] _EmissionColor("Emission", Color) = (0.0, 0.0, 0.0, 0.0)
     }
     SubShader
     {
@@ -41,6 +58,9 @@ Shader "Custom RP/Lit"
             #pragma shader_feature _CLIPPING
             #pragma shader_feature _PREMULTIPLY_ALPHA
             #pragma shader_feature _RECEIVE_SHADOWS
+            #pragma shader_feature _NORMAL_MAP
+            #pragma shader_feature _MASK_MAP
+            #pragma shader_feature _DETAIL_MAP
             #pragma multi_compile _ _CASCADE_BLEND_SOFT _CASCADE_BLEND_DITHER
             #pragma multi_compile _ _DIRECTIONAL_PCF3 _DIRECTIONAL_PCF5 _DIRECTIONAL_PCF7
             #pragma multi_compile _ _SHADOW_MASK_ALWAYS _SHADOW_MASK_DISTANCE

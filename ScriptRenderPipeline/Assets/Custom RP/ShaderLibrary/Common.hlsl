@@ -30,6 +30,7 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/UnityInstancing.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SpaceTransforms.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 float Square(float v) {
 	return v * v;
@@ -46,5 +47,39 @@ void ClipLOD(float2 positionCS, float fade) {
 	clip(fade + (fade < 0.0 ? dither : -dither));
 #endif
 }
+
+float3 DecodeNormal(float4 sample, float scale)
+{
+#if defined (UNITY_NO_DX5nm)
+	return normalize(UnpackNormalRGB(sample, scale));
+#else
+	return normalize(UnpackNormalmapRGorAG(sample, scale));
+#endif
+}
+
+float3 NormalTangentToWorld(float3 normalTS, float3 normalWS, float4 tangentWS)
+{
+	float3x3 tangentToWorld = CreateTangentToWorld(normalWS, tangentWS.xyz, tangentWS.w);
+	return TransformTangentToWorld(normalTS, tangentToWorld);
+}
+
+struct InputConfig {
+	float2 baseUV;
+	float2 detailUV;
+	bool useMask;
+	bool useDetail;
+};
+
+InputConfig GetInputConfig(float2 baseUV, float2 detailUV = 0.0) {
+	InputConfig c;
+	c.baseUV = baseUV;
+	c.detailUV = detailUV;
+	c.useMask = false;
+	c.useDetail = false;
+
+	return c;
+}
+
+#define INPUT_PROP(name) UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, name)
 
 #endif
