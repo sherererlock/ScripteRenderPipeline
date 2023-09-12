@@ -78,7 +78,10 @@ class Surface{
     float depth;
     float alpha;
     float metallic;
-    float smoothness;	
+    float smoothness;
+    float occlusion;
+    float dither;
+    float fresnelStrength; 
 }
 
 class Light{
@@ -319,3 +322,62 @@ $$
 
 
 Shadow**相关**
+
+```mermaid
+classDiagram
+class ShadowMask {
+	bool always;
+	bool distance;
+	float4 shadows;
+}
+
+class ShadowData{
+	int cascadeIndex;
+	float strength;
+	float cascadeBlend;
+	ShadowMask shadowMask;
+}
+
+class DirectionalShadowData{
+	float shadowStrength;
+	int tileIndex;
+	float normalBias;
+	int shadowMaskChannel;
+}
+```
+
+#### 阴影的计算
+
+**ShadowData**
+
+最大距离上需要fade，strength的计算方式$$ (1 - d/m) / f$$，d是离相机的距离，m是最大距离， f是0.1， 0.2， 0.5。如果超过最大距离，strength为0。
+
+级联之间需要Fade，cascadeBlend的计算方式是$$(1 - d^2 / r^2) / (1 - (1 -f)^2)$$
+
+shadowmask的计算
+
+always表示是否一直使用bakeShadowMap
+
+distance表示在最大阴影距离内使用实时阴影，最大距离外使用bakeShadowMap
+
+**DirectionalShadowData**
+
+shadowStrength是light.shadowStrength
+
+##### 混合烘焙阴影和实时阴影的算法
+
+always为真时
+
+```
+		shadow = lerp(1.0, shadow, global.strength);
+		shadow = min(baked, shadow);
+		shadow = lerp(1.0, shadow, strength);
+```
+
+distance为真时
+
+```
+		shadow = lerp(baked, shadow, global.strength);
+		shadow =  lerp(1.0, shadow, strength);
+```
+

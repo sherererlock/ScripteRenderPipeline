@@ -20,6 +20,43 @@ In Unity,每个级联（cascade）所覆盖的区域是通过创建一个剔除�
 
 ![img](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/cascaded-shadow-maps/culling-spheres.png)
 
+### Fading Cascades
+
+我们也可以在最后一级级联的边缘淡化阴影，而不是将它们截断，使用相同的方法。为此添加一个级联淡化阴影设置滑块是一个很好的主意
+
+```
+	public struct Directional {
+
+		…
+
+		[Range(0.001f, 1f)]
+		public float cascadeFade;
+	}
+
+	public Directional directional = new Directional {
+		…
+		cascadeRatio3 = 0.5f,
+		cascadeFade = 0.1f
+	};
+```
+
+唯一的区别是，我们使用级联的平方距离和半径，而不是线性深度和最大深度。这意味着过渡变得非线性：1 - d^2 / r^2，其中 r 是剔除球体的半径。差异并不是很大，但为了保持配置的淡化比率相同，我们必须用 1 - (1 - f)^2 替换 f。然后我们将其存储在阴影距离淡化向量的 Z 分量中，再次倒转。
+
+```
+	for (i = 0; i < _CascadeCount; i++) {
+		float4 sphere = _CascadeCullingSpheres[i];
+		float distanceSqr = DistanceSquared(surfaceWS.position, sphere.xyz);
+		if (distanceSqr < sphere.w) {
+			if (i == _CascadeCount - 1) {
+				data.strength *= FadedShadowStrength(
+					distanceSqr, 1.0 / sphere.w, _ShadowDistanceFade.z
+				);
+			}
+			break;
+		}
+	}
+```
+
 ## Shadow Quality
 
 既然我们拥有了功能完善的级联阴影贴图，让我们专注于提高阴影的质量。我们一直观察到的伪影被称为阴影痤疮，它是由于那些与光线方向不完全对齐的表面错误的自阴影造成的。随着表面越来越接近与光线方向平行，痤疮问题会变得更严重。
