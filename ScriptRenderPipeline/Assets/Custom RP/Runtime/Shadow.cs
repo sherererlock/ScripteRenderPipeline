@@ -261,7 +261,6 @@ public class Shadow
             maskChannel = lightBaking.occlusionMaskChannel;
         }
 
-
         if (!cullingResults.GetShadowCasterBounds(
             visibleLightIndex, out Bounds b
         ))
@@ -272,4 +271,23 @@ public class Shadow
         return new Vector4(light.shadowStrength, shadowSetting.directional.cascadeCount * ShadowedDirectionalLightCount++, light.shadowNormalBias, maskChannel) ;
     }
 
+    public Vector4 ReserveOtherShadows(Light light, int visibleLightIndex)
+    {
+        if (light.shadows != LightShadows.None && light.shadowStrength > 0f)
+        {
+            LightBakingOutput lightBaking = light.bakingOutput;
+            if (
+                lightBaking.lightmapBakeType == LightmapBakeType.Mixed &&
+                lightBaking.mixedLightingMode == MixedLightingMode.Shadowmask
+            )
+            {
+                useShadowMask = true;
+                return new Vector4(
+                    light.shadowStrength, 0f, 0f,
+                    lightBaking.occlusionMaskChannel
+                );
+            }
+        }
+        return new Vector4(0f, 0f, 0f, -1f);
+    }
 }

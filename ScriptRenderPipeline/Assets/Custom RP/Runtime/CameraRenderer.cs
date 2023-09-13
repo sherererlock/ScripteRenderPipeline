@@ -21,7 +21,7 @@ public partial class CameraRenderer
 
 	Lighting lighting = new Lighting();
 
-    public void Render (ScriptableRenderContext context, Camera camera, bool useDynamicBatching, bool useGPUInstancing, ShadowSetting shadowSetting) {
+    public void Render (ScriptableRenderContext context, Camera camera, bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject, ShadowSetting shadowSetting) {
 		this.context = context;
 		this.camera = camera;
 
@@ -33,13 +33,13 @@ public partial class CameraRenderer
 		buffer.BeginSample(SampleName);
 		ExecuteBuffer();
 
-		lighting.Setup(context, cullingResults, shadowSetting);
+		lighting.Setup(context, cullingResults, shadowSetting, useLightPerObject);
 
 		buffer.EndSample(SampleName);
 
         Setup();
 
-        DrawVisibleGeometry(useDynamicBatching, useGPUInstancing);
+        DrawVisibleGeometry(useDynamicBatching, useGPUInstancing, useLightPerObject);
 		DrawUnSupportedShaders();
 		DrawGizmos();
 
@@ -71,8 +71,10 @@ public partial class CameraRenderer
 		ExecuteBuffer();
     }
 
-	void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing)
+	void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject)
     {
+		PerObjectData lightPerObjectFlags = useLightPerObject ? PerObjectData.LightData | PerObjectData.LightIndices : PerObjectData.None;
+
 		var sortingSetting = new SortingSettings(camera)
         {
 			criteria = SortingCriteria.CommonOpaque
@@ -82,7 +84,7 @@ public partial class CameraRenderer
 		{
 			enableDynamicBatching = useDynamicBatching,
 			enableInstancing = useGPUInstancing,
-			perObjectData = PerObjectData.Lightmaps | PerObjectData.ShadowMask | PerObjectData.LightProbe | PerObjectData.OcclusionProbe | PerObjectData.LightProbeProxyVolume | PerObjectData.ReflectionProbes | PerObjectData.OcclusionProbeProxyVolume,
+			perObjectData = PerObjectData.Lightmaps | PerObjectData.ShadowMask | PerObjectData.LightProbe | PerObjectData.OcclusionProbe | PerObjectData.LightProbeProxyVolume | PerObjectData.ReflectionProbes | PerObjectData.OcclusionProbeProxyVolume | lightPerObjectFlags,
 		};
 
 		drawSettings.SetShaderPassName(1, litShaderTagId);

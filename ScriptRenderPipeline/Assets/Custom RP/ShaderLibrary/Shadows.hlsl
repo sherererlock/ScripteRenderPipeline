@@ -56,6 +56,10 @@ struct DirectionalShadowData
 	int shadowMaskChannel;
 };
 
+struct OtherShadowData{
+	float strength;
+	int shadowMaskChannel;
+};
 
 float SampleDirectionalShadowAtlas(float3 positionSTS)
 {
@@ -83,15 +87,18 @@ float FilterDirectionalShadow(float3 positionSTS)
 
 float GetCascadedShadow(
 	DirectionalShadowData directional, ShadowData global, Surface surfaceWS
-) {
+) 
+{
 	float3 normalBias = surfaceWS.interpolatedNormal *
 		(directional.normalBias * _CascadeData[global.cascadeIndex].y);
 	float3 positionSTS = mul(
 		_DirectionalShadowMatrices[directional.tileIndex],
 		float4(surfaceWS.position + normalBias, 1.0)
 	).xyz;
+
 	float shadow = FilterDirectionalShadow(positionSTS);
-	if (global.cascadeBlend < 1.0) {
+	if (global.cascadeBlend < 1.0) 
+	{
 		normalBias = surfaceWS.interpolatedNormal *
 			(directional.normalBias * _CascadeData[global.cascadeIndex + 1].y);
 		positionSTS = mul(
@@ -105,7 +112,8 @@ float GetCascadedShadow(
 	return shadow;
 }
 
-float GetBakedShadow(ShadowMask mask, int channel) {
+float GetBakedShadow(ShadowMask mask, int channel)
+{
 	float shadow = 1.0;
 	if (mask.distance || mask.always) {
 		if(channel >= 0)
@@ -114,7 +122,8 @@ float GetBakedShadow(ShadowMask mask, int channel) {
 	return shadow;
 }
 
-float GetBakedShadow(ShadowMask mask, int channel, float strength) {
+float GetBakedShadow(ShadowMask mask, int channel, float strength)
+{
 	if (mask.distance || mask.always) {
 		return lerp(1.0, GetBakedShadow(mask, channel), strength);
 	}
@@ -123,7 +132,8 @@ float GetBakedShadow(ShadowMask mask, int channel, float strength) {
 
 float MixBakedAndRealtimeShadows(
 	ShadowData global, float shadow, int shadowMaskChannel, float strength
-) {
+)
+{
 	float baked = GetBakedShadow(global.shadowMask, shadowMaskChannel);
 	if (global.shadowMask.always)
 	{
@@ -154,6 +164,27 @@ float GetDirectionalShadowAttenuation(DirectionalShadowData data, ShadowData sha
 	{
 		shadow = GetCascadedShadow(data, shadowData, surface);
 		shadow = MixBakedAndRealtimeShadows(shadowData, shadow, data.shadowMaskChannel, data.shadowStrength);
+	}
+
+	return shadow;
+}
+
+float GetOtherShadowAttenuation(OtherShadowData other, ShadowData global, Surface surfaceWS)
+ {
+	#if !defined(_RECEIVE_SHADOWS)
+		return 1.0;
+	#endif
+	
+	float shadow;
+	if (other.strength > 0.0) 
+	{
+		shadow = GetBakedShadow(
+			global.shadowMask, other.shadowMaskChannel, other.strength
+		);
+	}
+	else 
+	{
+		shadow = 1.0;
 	}
 
 	return shadow;
