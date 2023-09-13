@@ -1,5 +1,9 @@
 # **Shadow Masks** 
 
+[TOC]
+
+
+
 ## Baking Shadows
 
 使用光照贴图的优势在于我们不受最大阴影距离的限制。烘焙阴影不会被剔除，但也无法改变。理想情况下，我们可以**在最大阴影距离内使用实时阴影，超出该距离则使用烘焙阴影**。Unity的阴影蒙版混合光照模式使这成为可能。
@@ -494,14 +498,14 @@ shadow = GetBakedShadow(global.shadowMask, abs(directional.strength));
 
 ### Always use the Shadow Mask
 
-还有另一种阴影蒙版模式，称为“Shadowmask”。它与距离模式完全相同，只是Unity会忽略使用阴影蒙版的光源的静态投射阴影者。
+还有另一种阴影蒙版模式，称为“Shadowmask”。它与距离模式完全相同，只是**Unity会忽略使用阴影蒙版的光源的静态投射阴影者**。
 
 ![project settings](https://catlikecoding.com/unity/tutorials/custom-srp/shadow-masks/mixing-shadows/shadow-mask-mode-always.png)
 
 ![scene](https://catlikecoding.com/unity/tutorials/custom-srp/shadow-masks/mixing-shadows/no-static-shadows.png)
 
 
-这个想法是，由于阴影蒙版在各个地方都可用，我们也可以在所有地方使用它进行静态阴影。这意味着较少的实时阴影，从而加快渲染速度，但代价是近距离处的静态阴影质量较低。
+这个想法是，**由于阴影蒙版在各个地方都可用，我们也可以在所有地方使用它进行静态阴影。这意味着较少的实时阴影，从而加快渲染速度，但代价是近距离处的静态阴影质量较低。**
 
 为了支持这种模式，在“Shadows”中的阴影蒙版关键字数组中添加一个名为“_SHADOW_MASK_ALWAYS”的关键字作为第一个元素。我们可以通过检查“QualitySettings.shadowmaskMode”属性来确定在渲染时应该启用哪个关键字。
 

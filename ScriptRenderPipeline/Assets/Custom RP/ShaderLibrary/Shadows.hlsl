@@ -18,10 +18,25 @@
 	#define DIRECTIONAL_FILTER_SETUP SampleShadow_ComputeSamples_Tent_7x7
 #endif
 
+#if defined(_OTHER_PCF3)
+	#define OTHER_FILTER_SAMPLES 4
+	#define OTHER_FILTER_SETUP SampleShadow_ComputeSamples_Tent_3x3
+#elif defined(_OTHER_PCF5)
+	#define OTHER_FILTER_SAMPLES 9
+	#define OTHER_FILTER_SETUP SampleShadow_ComputeSamples_Tent_5x5
+#elif defined(_OTHER_PCF7)
+	#define OTHER_FILTER_SAMPLES 16
+	#define OTHER_FILTER_SETUP SampleShadow_ComputeSamples_Tent_7x7
+#endif
+
 #define Max_Directional_Light_Count 4
 #define Max_Cascades_Count 4
 
+#define Max_Other_Light_Count 4
+
 TEXTURE2D_SHADOW(_DirectionalShadowAtlas);
+TEXTURE2D_SHADOW(_OtherShadowAtlas);
+
 #define SHADOW_SAMPLER sampler_linear_clamp_compare
 SAMPLER_CMP(SHADOW_SAMPLER);
 
@@ -31,7 +46,9 @@ CBUFFER_START(_CustomShadows)
 	float4 _ShadowAtlasSize;
 	float4 _CullingSpheres[Max_Cascades_Count];
 	float4 _CascadeData[Max_Cascades_Count];
+	float4 _OtherShadowTiles[Max_Other_Light_Count];
 	float4x4 _DirectionalShadowMatrices[Max_Directional_Light_Count * Max_Cascades_Count];
+	float4x4 _OtherShadowMatrices[Max_Other_Light_Count];
 CBUFFER_END
 
 struct ShadowMask {
@@ -58,7 +75,10 @@ struct DirectionalShadowData
 
 struct OtherShadowData{
 	float strength;
+	int tileIndex;
 	int shadowMaskChannel;
+	float3 lightPositionWS;
+	float3 spotDirectionWS;
 };
 
 float SampleDirectionalShadowAtlas(float3 positionSTS)
@@ -82,6 +102,30 @@ float FilterDirectionalShadow(float3 positionSTS)
 	return shadow;
 #else
 	return SampleDirectionalShadowAtlas(positionSTS);
+#endif
+}
+
+float SampleOtherShadowAtlas(float3 positionSTS)
+{
+	return SAMPLE_TEXTURE2D_SHADOW(_OtherShadowAtlas, SHADOW_SAMPLER, positionSTS);
+}
+
+float FilterOtherShadow(float3 positionSTS)
+{
+#ifdef OTHER_FILTER_SETUP
+
+	float shadow = 0.0;
+	float weights[OTHER_FILTER_SAMPLES];
+	float2 positions[OTHER_FILTER_SAMPLES];
+	float4 size = _ShadowAtlasSize.yyxx;
+	OTHER_FILTER_SETUP(size, positionSTS.xy, weights, positions);
+
+	for (int i = 0; i < DIRECTIONAL_FILTER_SAMPLES; i++)
+		shadow += weights[i] * SampleOtherShadowAtlas(float3(positions[i].xy, positionSTS.z));
+
+	return shadow;
+#else
+	return SampleOtherShadowAtlas(positionSTS);
 #endif
 }
 
@@ -142,10 +186,12 @@ float MixBakedAndRealtimeShadows(
 		return lerp(1.0, shadow, strength);
 	}
 
-	if (global.shadowMask.distance) {
+	if (global.shadowMask.distance) 
+	{
 		shadow = lerp(baked, shadow, global.strength);
 		return lerp(1.0, shadow, strength);
 	}
+
 	return lerp(1.0, shadow, strength * global.strength);
 }
 
@@ -169,6 +215,21 @@ float GetDirectionalShadowAttenuation(DirectionalShadowData data, ShadowData sha
 	return shadow;
 }
 
+float GetOtherShadow(OtherShadowData other, ShadowData global, Surface surfaceWS)
+{
+	float4 tileData = _OtherShadowTiles[other.tileIndex];
+
+	float3 surfaceToLight = other.lightPositionWS - surfaceWS.position;
+	float distanceToLightPlane = dot(surfaceToLight, other.spotDirectionWS);
+
+	float3 normalBias = surfaceWS.interpolatedNormal * tileData.w * distanceToLightPlane;
+	float4 positionSTS = mul(
+		_OtherShadowMatrices[other.tileIndex],
+		float4(surfaceWS.position + normalBias, 1.0)
+	);
+	return FilterOtherShadow(positionSTS.xyz / positionSTS.w);
+}
+
 float GetOtherShadowAttenuation(OtherShadowData other, ShadowData global, Surface surfaceWS)
  {
 	#if !defined(_RECEIVE_SHADOWS)
@@ -176,15 +237,16 @@ float GetOtherShadowAttenuation(OtherShadowData other, ShadowData global, Surfac
 	#endif
 	
 	float shadow;
-	if (other.strength > 0.0) 
+	if (other.strength * global.strength <= 0.0) 
 	{
 		shadow = GetBakedShadow(
-			global.shadowMask, other.shadowMaskChannel, other.strength
+			global.shadowMask, other.shadowMaskChannel, abs(other.strength)
 		);
 	}
 	else 
 	{
-		shadow = 1.0;
+		shadow = GetOtherShadow(other, global, surfaceWS);
+		shadow = MixBakedAndRealtimeShadows(global, shadow, other.shadowMaskChannel, other.strength);
 	}
 
 	return shadow;
@@ -219,10 +281,11 @@ ShadowData GetShadowData(Surface surface)
 		}
 	}
 
-	if (i >= _CascadeCount)
+	if (i >= _CascadeCount && _CascadeCount > 0)
 	{
 		data.strength = 0.0;
 	}
+
 #ifdef _CASCADE_BLEND_DITHER
 	else if (data.cascadeBlend < surface.dither)
 	{

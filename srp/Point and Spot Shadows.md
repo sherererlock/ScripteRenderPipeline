@@ -438,7 +438,6 @@ Invoke this method inside the loop of `RenderOtherShadows`.
 
 ### No Pancaking
 
-
 现在，阴影会为聚光灯渲染，使用与用于定向阴影相同的ShadowCaster通道。这在大多数情况下运行良好，但阴影平面仅适用于正交阴影投影，用于假定定向光源无限远的情况。而对于聚光灯，它们具有位置，因此阴影投射器可能部分位于光源位置之后。在这种情况下，由于我们使用透视投影，将顶点限制在近平面上会严重扭曲这些阴影。因此，在不适当使用阴影平面时，我们应该关闭限制。
 
 我们可以通过全局着色器属性告诉着色器是否启用了阴影平面，我们将其命名为_ShadowPancaking。在Shadows中跟踪其标识符。
@@ -723,6 +722,14 @@ Light GetOtherLight (int index, Surface surfaceWS, ShadowData shadowData) {
 ```
 
 在GetOtherShadow中，我们通过取表面到光线矢量与聚光方向的点积来找到到平面的距离。使用它来缩放法线偏差。
+
+```
+	float4 tileData = _OtherShadowTiles[other.tileIndex];
+	float3 surfaceToLight = other.lightPositionWS - surfaceWS.position;
+	float distanceToLightPlane = dot(surfaceToLight, other.spotDirectionWS);
+	float3 normalBias =
+		surfaceWS.interpolatedNormal * (distanceToLightPlane * tileData.w);
+```
 
 ![img](https://catlikecoding.com/unity/tutorials/custom-srp/point-and-spot-shadows/spot-light-shadows/normal-bias-variable.png)
 
