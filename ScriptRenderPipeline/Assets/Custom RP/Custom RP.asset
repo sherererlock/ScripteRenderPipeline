@@ -28,3 +28,6 @@ MonoBehaviour:
       cascadeFade: 0.1
       filterMode: 0
       cadcadeBlend: 2
+    other:
+      atlasSize: 1024
+      filter: 0
