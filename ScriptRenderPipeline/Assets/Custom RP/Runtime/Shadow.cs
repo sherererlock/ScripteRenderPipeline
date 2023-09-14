@@ -23,11 +23,6 @@ public class Shadow
 
     static int shadowPancakingId = Shader.PropertyToID("_ShadowPancaking");
 
-    static Vector4[] cullingSpheres = new Vector4[maxCascades];
-    static Vector4[] cascadeData = new Vector4[maxCascades];
-
-    static Vector4[] otherShadowTiles = new Vector4[maxShadowedOtherLightCount];
-
     ScriptableRenderContext context;
     CullingResults cullingResults;
     ShadowSetting shadowSetting;
@@ -44,6 +39,10 @@ public class Shadow
 
     ShadowDirectionalLight[] shadowDirectionalLights = new ShadowDirectionalLight[maxShadowDirectionalLightCount];
     int ShadowedDirectionalLightCount = 0, ShadowedOtherLightCount = 0;
+
+    static Vector4[] cullingSpheres = new Vector4[maxCascades];
+    static Vector4[] cascadeData = new Vector4[maxCascades];
+    static Vector4[] otherShadowTiles = new Vector4[maxShadowedOtherLightCount];
 
     static Matrix4x4[] directionalShadowMatrices = new Matrix4x4[maxShadowDirectionalLightCount * maxCascades];
     static Matrix4x4[] otherShadowMatrices = new Matrix4x4[maxShadowedOtherLightCount];
@@ -130,7 +129,6 @@ public class Shadow
     void RenderDirectionalShadows()
     {
         int size = (int)shadowSetting.directional.atlasSize;
-
         atlasSizes.x = size;
         atlasSizes.y = 1f / size;
 
@@ -149,10 +147,7 @@ public class Shadow
             RenderDirectionalShadow(i, split, tileSize);
 
         buffer.SetGlobalMatrixArray(dirShadowMatricesId, directionalShadowMatrices);
-
         buffer.SetGlobalVectorArray(cullingSpheresId, cullingSpheres);
-
-
         buffer.SetGlobalVectorArray(cascadeDataId, cascadeData);
 
         SetKeywords(cascadeBlendKeyWords, (int)shadowSetting.directional.cadcadeBlend - 1);
@@ -165,26 +160,22 @@ public class Shadow
     void RenderOtherShadows()
     {
         int size = (int)shadowSetting.other.atlasSize;
-
-        atlasSizes.x = size;
-        atlasSizes.y = 1f / size;
+        atlasSizes.z = size;
+        atlasSizes.w = 1f / size;
 
         buffer.GetTemporaryRT(otherShadowAtlasId, size, size, 32, FilterMode.Bilinear, RenderTextureFormat.Shadowmap);
         buffer.SetRenderTarget(otherShadowAtlasId, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-        buffer.SetGlobalFloat(shadowPancakingId, 1f);
+        buffer.SetGlobalFloat(shadowPancakingId, 0f);
         buffer.ClearRenderTarget(true, false, Color.clear);
         buffer.BeginSample(bufferName);
         ExecuteBuffer();
 
         int tiles = ShadowedOtherLightCount;
-
         int split = tiles <= 1 ? 1 : tiles <= 4 ? 2 : 4;
         int tileSize = size / split;
 
         for (int i = 0; i < ShadowedOtherLightCount; i++)
-        {
             RenderSpotShadows(i, split, tileSize);
-        }
 
         buffer.SetGlobalMatrixArray(otherShadowMatricesId, otherShadowMatrices);
         buffer.SetGlobalVectorArray(otherShadowTilesId, otherShadowTiles);

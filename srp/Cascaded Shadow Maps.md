@@ -255,3 +255,138 @@ struct ShadowData {
 ## Transparency
 
 在本教程中，我们将考虑透明的投射阴影物体。剪裁、淡化和透明材质都可以像不透明材质一样接收阴影，但目前只有剪裁材质会正确地投射阴影。透明物体的行为就像它们是实心的阴影投射物体一样。
+
+### Normal Bias
+
+
+不正确的自阴影发生是因为一个阴影投射器深度纹素覆盖了多个片段，这导致投射器的体积突出了其表面。因此，如果我们将投射器缩小足够多，这种情况就不会再发生。然而，缩小阴影投射器会使阴影比它们应该的要小，并且可能会引入不应存在的空洞。
+
+我们还可以做相反的操作：在采样阴影时膨胀表面。然后，我们在表面上略微远离采样，足够远离以避免不正确的自阴影。这将略微调整阴影的位置，可能会导致边缘上的不对齐和添加虚假阴影，但这些伪影通常比“彼得潘”现象不明显得多。
+
+我们可以通过沿其法线向量略微移动表面位置来实现这一点，用于采样阴影。如果我们只考虑一个维度，那么等于世界空间纹素大小的偏移量应该足够了。我们可以通过将剔除球的直径除以图块大小来在SetCascadeData中找到纹素大小。将其存储在级联数据向量的Y分量中。
+
+```
+		float texelSize = 2f * cullingSphere.w / tileSize;
+		cullingSphere.w *= cullingSphere.w;
+		cascadeCullingSpheres[index] = cullingSphere;
+		//cascadeData[index].x = 1f / cullingSphere.w;
+		cascadeData[index] = new Vector4(
+			1f / cullingSphere.w,
+			texelSize
+		);
+```
+
+然而，这并不总是足够的，因为纹素是正方形的。在最坏的情况下，我们最终不得不沿着正方形的对角线偏移，所以让我们将其乘以√2。
+
+```
+texelSize * 1.4142136f
+```
+
+在着色器部分，向GetDirectionalShadowAttenuation添加一个用于全局阴影数据的参数。将表面法线与偏移相乘，以找到法线偏差，然后在计算阴影平铺空间中的位置之前将其添加到世界位置中。
+
+```
+float GetDirectionalShadowAttenuation (
+	DirectionalShadowData directional, ShadowData global, Surface surfaceWS
+) {
+	if (directional.strength <= 0.0) {
+		return 1.0;
+	}
+	float3 normalBias = surfaceWS.normal * _CascadeData[global.cascadeIndex].y;
+	float3 positionSTS = mul(
+		_DirectionalShadowMatrices[directional.tileIndex],
+		float4(surfaceWS.position + normalBias, 1.0)
+	).xyz;
+	float shadow = SampleDirectionalShadowAtlas(positionSTS);
+	return lerp(1.0, shadow, directional.strength);
+}
+```
+
+Pass the extra data to it in `GetDirectionalLight`.
+
+```
+	light.attenuation =
+		GetDirectionalShadowAttenuation(dirShadowData, shadowData, surfaceWS);
+```
+
+### Configurable Biases
+
+法线偏差可以消除阴影痤疮而不引入明显的新伪影，但它无法消除所有阴影问题。例如，在墙下的地板上可见到不应存在的阴影线。这不是自阴影，而是从墙上伸出的阴影影响到了下面的地板。通过添加一点坡度比例偏差可以处理这些问题，但没有完美的值。因此，我们将根据光源进行配置，使用其现有的偏差滑块。在Shadows中的ShadowedirectionalLight结构体中添加一个字段来处理这个偏差。
+
+```
+	struct ShadowedDirectionalLight {
+		public int visibleLightIndex;
+		public float slopeScaleBias;
+	}
+```
+
+光源的偏差通过其shadowBias属性提供。将其添加到ReserveDirectionalShadows中的数据中。
+
+```
+			shadowedDirectionalLights[ShadowedDirectionalLightCount] =
+				new ShadowedDirectionalLight {
+					visibleLightIndex = visibleLightIndex,
+					slopeScaleBias = light.shadowBias
+				};
+```
+
+And use it to configure the slope-scale bias in `RenderDirectionalShadows`.
+
+```
+			buffer.SetGlobalDepthBias(0f, light.slopeScaleBias);
+			ExecuteBuffer();
+			context.DrawShadows(ref shadowSettings);
+			buffer.SetGlobalDepthBias(0f, 0f);
+```
+
+让我们还可以使用光源的现有法线偏差滑块来调节我们应用的法线偏差。让ReserveDirectionalShadows返回一个Vector3，使用光源的shadowNormalBias作为新的Z分量。
+
+```
+	public Vector3 ReserveDirectionalShadows (
+		Light light, int visibleLightIndex
+	) {
+		if (…) {
+			…
+			return new Vector3(
+				light.shadowStrength,
+				settings.directional.cascadeCount * ShadowedDirectionalLightCount++,
+				light.shadowNormalBias
+			);
+		}
+		return Vector3.zero;
+	}
+```
+
+将新的法线偏差添加到DirectionalShadowData中，并在Shadows中的GetDirectionalShadowAttenuation中应用它。
+
+```
+struct DirectionalShadowData {
+	float strength;
+	int tileIndex;
+	float normalBias;
+};
+
+…
+
+float GetDirectionalShadowAttenuation (…) {
+	…
+	float3 normalBias = surfaceWS.normal *
+		(directional.normalBias * _CascadeData[global.cascadeIndex].y);
+	…
+}
+```
+
+And configure it in `GetDirectionalShadowData` in *Light*.
+
+```
+data.tileIndex =
+		_DirectionalLightShadowData[lightIndex].y + shadowData.cascadeIndex;
+	data.normalBias = _DirectionalLightShadowData[lightIndex].z;
+```
+
+现在我们可以针对每个光源调整这两个偏差。斜坡-比例偏差设为零，法线偏差设为一是一个不错的默认值。如果你增加第一个偏差，可以减小第二个偏差。但要记住，我们正在以与其原始目的不同的方式解释这些光源设置。它们曾经是剪裁空间深度偏差和世界空间缩小法线偏差。因此，当你创建一个新的光源时，直到调整这些偏差之前，你会遇到严重的彼得潘现象。
+
+![settings](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/light-settings.png)
+
+![sphere](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/configured-bias-sphere.png)
+
+![cube](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/configured-bias-cube.png)

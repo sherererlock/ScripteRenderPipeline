@@ -32,7 +32,7 @@
 #define Max_Directional_Light_Count 4
 #define Max_Cascades_Count 4
 
-#define Max_Other_Light_Count 4
+#define Max_Other_Light_Count 16
 
 TEXTURE2D_SHADOW(_DirectionalShadowAtlas);
 TEXTURE2D_SHADOW(_OtherShadowAtlas);
@@ -117,10 +117,10 @@ float FilterOtherShadow(float3 positionSTS)
 	float shadow = 0.0;
 	float weights[OTHER_FILTER_SAMPLES];
 	float2 positions[OTHER_FILTER_SAMPLES];
-	float4 size = _ShadowAtlasSize.yyxx;
+	float4 size = _ShadowAtlasSize.wwzz;
 	OTHER_FILTER_SETUP(size, positionSTS.xy, weights, positions);
 
-	for (int i = 0; i < DIRECTIONAL_FILTER_SAMPLES; i++)
+	for (int i = 0; i < OTHER_FILTER_SAMPLES; i++)
 		shadow += weights[i] * SampleOtherShadowAtlas(float3(positions[i].xy, positionSTS.z));
 
 	return shadow;
