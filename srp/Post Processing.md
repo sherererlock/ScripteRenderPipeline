@@ -1,5 +1,9 @@
 # Post Processing
 
+[TOC]
+
+
+
 ## Post-FX Stack
 
 大多数情况下，渲染的图像不会直接显示出来。图像会进行后处理，应用各种效果，简称FX。常见的FX包括泛光(Bloom)、颜色分级(Color Grading)、景深(depth of filed)、运动模糊(Motion blur)和色调映射(ToneMapping)。这些FX会作为一个堆栈依次应用在图像上。在本教程中，我们将创建一个简单的后处理FX堆栈，最初只支持泛光效果。
@@ -498,3 +502,671 @@ Varyings DefaultPassVertex (uint vertexID : SV_VertexID) {
 	return output;
 }
 ```
+
+## Bloom
+
+泛光后处理效果用于使物体发光。这在物理学上有一定的基础，但经典的泛光效果更多是一种艺术效果，而不是现实主义。非现实的泛光效果非常明显，因此是一个很好的效果，用来演示我们的后处理FX堆栈是否正常工作。在下一个教程中，我们将介绍更加逼真的泛光效果，当我们讨论HDR渲染时。而现在，我们将以LDR泛光发光效果为目标。
+
+### Bloom Pyramid
+
+泛光代表颜色的散射，可以通过对图像进行模糊来实现。明亮的像素将渗入相邻的较暗像素中，因此看起来会发光。最简单和最快速的方式来模糊纹理是将其复制到另一个宽度和高度减半的纹理中。每个复制通道的采样最终会在四个源像素之间采样。使用双线性过滤，这将平均2×2像素块。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/2x2-bilinear-downsampling.png)
+
+只进行一次模糊效果会很轻微。因此，我们重复这个过程，逐渐降采样直到达到所需级别，有效地构建了一个纹理金字塔。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/texture-pyramid.png)
+
+我们需要跟踪堆栈中的纹理，但纹理的数量取决于金字塔中有多少级别，这取决于源图像的大小。让我们在PostFXStack中定义最多十六个级别，这足以将一个65,536×65,526的纹理缩小到一个像素。
+
+```
+	const int maxBloomPyramidLevels = 16;
+```
+
+为了跟踪金字塔中的纹理，我们需要纹理标识符。我们将使用属性名称 _BloomPyramid0、_BloomPyramid1 等等。但是，让我们不要显式地编写所有这些十六个名称。相反，我们将在构造方法中获取这些标识符，并只跟踪第一个。这是因为 Shader.PropertyToID 会根据请求的新属性名称的顺序按顺序分配标识符。我们只需要确保一次请求所有标识符，因为这些数字在应用程序会话中是固定的，无论是在编辑器中还是在构建中。
+
+```
+	int bloomPyramidId;
+	
+	…
+	
+	public PostFXStack () {
+		bloomPyramidId = Shader.PropertyToID("_BloomPyramid0");
+		for (int i = 1; i < maxBloomPyramidLevels; i++) {
+			Shader.PropertyToID("_BloomPyramid" + i);
+		}
+	}
+```
+
+现在创建一个DoBloom方法，用于对给定的源标识符应用泛光效果。首先，将摄像机的像素宽度和高度减半，并选择默认的渲染纹理格式。最初，我们将从源复制到金字塔中的第一个纹理。跟踪这些标识符。
+
+```
+	void DoBloom (int sourceId) {
+		buffer.BeginSample("Bloom");
+		int width = camera.pixelWidth / 2, height = camera.pixelHeight / 2;
+		RenderTextureFormat format = RenderTextureFormat.Default;
+		int fromId = sourceId, toId = bloomPyramidId;
+		buffer.EndSample("Bloom");
+	}
+```
+
+然后循环遍历所有的金字塔级别。每次迭代，首先检查级别是否会变得退化。如果是这样，我们会在那一点停止。如果不是，获取一个新的渲染纹理，复制到它，将其设置为新的源，递增目标，然后再次将维度减半。将循环迭代变量声明在循环外部，因为我们后面会用到它。
+
+```
+		int fromId = sourceId, toId = bloomPyramidId;
+
+		int i;
+		for (i = 0; i < maxBloomPyramidLevels; i++) {
+			if (height < 1 || width < 1) {
+				break;
+			}
+			buffer.GetTemporaryRT(
+				toId, width, height, 0, FilterMode.Bilinear, format
+			);
+			Draw(fromId, toId, Pass.Copy);
+			fromId = toId;
+			toId += 1;
+			width /= 2;
+			height /= 2;
+		}
+```
+
+一旦金字塔完成，将最终结果复制到摄像机目标。然后递减迭代器并反向循环，释放我们占用的所有纹理。
+
+```
+		for (i = 0; i < maxBloomPyramidLevels; i++) { … }
+
+		Draw(fromId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+
+		for (i -= 1; i >= 0; i--) {
+			buffer.ReleaseTemporaryRT(bloomPyramidId + i);
+		}
+		buffer.EndSample("Bloom");
+```
+
+现在我们可以用泛光效果替换Render中的简单复制。
+
+```
+	public void Render (int sourceId) {
+		//Draw(sourceId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+		DoBloom(sourceId);
+		context.ExecuteCommandBuffer(buffer);
+		buffer.Clear();
+	}
+```
+
+### Configurable Bloom
+
+现在我们模糊得太多，最终结果几乎是均匀的。您可以通过帧调试器检查中间步骤。这些步骤似乎更适合作为终点，因此让我们可以提前停止。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/progressive-downsampling.png)
+
+我们可以以两种方式实现这一点。首先，我们可以限制模糊迭代的数量。其次，我们可以将降分辨率限制设置为较高的值。让我们通过在PostFXSettings中添加一个名为BloomSettings的配置结构体来支持这两种方式，并为它们提供选项。通过一个getter属性公开它。
+
+```
+	[System.Serializable]
+	public struct BloomSettings {
+
+		[Range(0f, 16f)]
+		public int maxIterations;
+
+		[Min(1f)]
+		public int downscaleLimit;
+	}
+
+	[SerializeField]
+	BloomSettings bloom = default;
+
+	public BloomSettings Bloom => bloom;
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/bloom-settings.png)
+
+Have PostFXStack.DoBloom use these settings to limit itself.
+
+```
+		PostFXSettings.BloomSettings bloom = settings.Bloom;
+		int width = camera.pixelWidth / 2, height = camera.pixelHeight / 2;
+		RenderTextureFormat format = RenderTextureFormat.Default;
+		int fromId = sourceId, toId = bloomPyramidId;
+
+		int i;
+		for (i = 0; i < bloom.maxIterations; i++) {
+			if (height < bloom.downscaleLimit || width < bloom.downscaleLimit) {
+				break;
+			}
+			buffer.GetTemporaryRT(
+				toId, width, height, 0, FilterMode.Bilinear, format
+			);
+			…
+		}
+```
+
+![3 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/down-3.png)
+
+![5 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/down-5.png)
+
+### Gaussian Filtering
+
+使用小型2×2滤波器进行降采样会产生非常块状的结果。通过使用更大的滤波器核心，例如近似的9×9高斯滤波器，可以大大改善效果。如果我们将这个操作与双线性降采样相结合，就可以将其有效地扩展为18×18。这是Universal RP和HDRP用于它们的泛光效果的方法。
+
+尽管这个操作混合了81个样本，但它是可分离的，这意味着它可以分为水平和垂直两个通道，每个通道混合九个样本的单行或单列。因此，我们只需要采样18次，但每次迭代需要两次绘制。
+
+### How does a separable filter work?
+
+这是一个可以使用对称的行向量与其转置相乘来创建的滤波器。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/separable-filter.png)
+
+让我们从水平通道开始。在PostFXStackPasses中为此创建一个新的BloomHorizontalPassFragment函数。它会累积在当前UV坐标上居中的九个样本。同时，我们也会进行降采样，因此每个偏移步骤都是源纹理像素宽度的两倍。从左侧开始的样本权重为0.01621622、0.05405405、0.12162162、0.19459459，然后中心为0.22702703，其他侧反向。
+
+```
+float4 _PostFXSource_TexelSize;
+
+float4 GetSourceTexelSize () {
+	return _PostFXSource_TexelSize;
+}
+
+…
+
+float4 BloomHorizontalPassFragment (Varyings input) : SV_TARGET {
+	float3 color = 0.0;
+	float offsets[] = {
+		-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0
+	};
+	float weights[] = {
+		0.01621622, 0.05405405, 0.12162162, 0.19459459, 0.22702703,
+		0.19459459, 0.12162162, 0.05405405, 0.01621622
+	};
+	for (int i = 0; i < 9; i++) {
+		float offset = offsets[i] * 2.0 * GetSourceTexelSize().x;
+		color += GetSource(input.screenUV + float2(offset, 0.0)).rgb * weights[i];
+	}
+	return float4(color, 1.0);
+}
+```
+
+### Where do those weights come from?
+
+这些权重是从帕斯卡三角派生而来的。对于一个正确的9×9高斯滤波器，我们将选择三角形的第九行，即1 8 28 56 70 56 28 8 1。但这使得滤波器边缘的样本贡献过于微弱，难以察觉，因此我们下降到第十三行并切掉其边缘，得到66 220 495 792 924 792 495 220 66。这些数字的总和是4070，所以将每个数字除以4070以获得最终的权重。
+
+还将此通道添加到PostFXStack着色器中。我将它放在复制通道之上，以保持它们按字母顺序排列。
+
+```
+		Pass {
+			Name "Bloom Horizontal"
+			
+			HLSLPROGRAM
+				#pragma target 3.5
+				#pragma vertex DefaultPassVertex
+				#pragma fragment BloomHorizontalPassFragment
+			ENDHLSL
+		}
+```
+
+Add an entry for it to the `**PostFXStack**.**Pass**` enum as well, again in the same order.
+
+Now we can use the bloom-horizontal pass when downsampling in `DoBloom`.
+
+```
+	Draw(fromId, toId, Pass.BloomHorizontal);
+```
+
+![3 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/down-horizontal-3.png)
+
+![5 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/down-horizontal-5.png)
+
+在这一点上，结果显然在水平方向被拉伸，但看起来很有希望。我们可以通过复制BloomHorizontalPassFragment、重命名它，并切换从行到列来创建垂直通道。在第一个通道中我们进行了降采样，但这次我们保持相同的大小来完成高斯滤波，因此纹理大小的偏移不应该加倍。
+
+```
+float4 BloomVerticalPassFragment (Varyings input) : SV_TARGET {
+	float3 color = 0.0;
+	float offsets[] = {
+		-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0
+	};
+	float weights[] = {
+		0.01621622, 0.05405405, 0.12162162, 0.19459459, 0.22702703,
+		0.19459459, 0.12162162, 0.05405405, 0.01621622
+	};
+	for (int i = 0; i < 9; i++) {
+		float offset = offsets[i] * GetSourceTexelSize().y;
+		color += GetSource(input.screenUV + float2(0.0, offset)).rgb * weights[i];
+	}
+	return float4(color, 1.0);
+}
+```
+
+
+也为它添加一个通道和枚举条目。从现在开始，我不会再显示这些步骤了。
+
+现在，我们需要在每个金字塔级别的中间添加一个额外的步骤，为此我们还需要保留纹理标识符。我们可以通过在PostFXStack构造函数中简单地将循环限制加倍来实现。由于我们还没有引入其他着色器属性名称，标识符都将按顺序排列，否则需要重新启动Unity。
+
+```
+	public PostFXStack () {
+		bloomPyramidId = Shader.PropertyToID("_BloomPyramid0");
+		for (int i = 1; i < maxBloomPyramidLevels * 2; i++) {
+			Shader.PropertyToID("_BloomPyramid" + i);
+		}
+	}
+```
+
+在DoBloom中，目标标识符现在必须从更高的值开始，并在每次降采样步骤后增加两个。然后，中间的纹理可以放在中间。水平绘制进入中间，然后是垂直绘制到目标。我们还必须释放额外的纹理，最简单的方法是从金字塔的最后一个源纹理开始向后处理。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/hv-downsamling.png)
+
+```
+	void DoBloom (int sourceId) {
+		…
+		int fromId = sourceId, toId = bloomPyramidId + 1;
+		
+		for (i = 0; i < bloom.maxIterations; i++) {
+			…
+			int midId = toId - 1;
+			buffer.GetTemporaryRT(
+				midId, width, height, 0, FilterMode.Bilinear, format
+			);
+			buffer.GetTemporaryRT(
+				toId, width, height, 0, FilterMode.Bilinear, format
+			);
+			Draw(fromId, midId, Pass.BloomHorizontal);
+			Draw(midId, toId, Pass.BloomVertical);
+			fromId = toId;
+			toId += 2;
+			…
+		}
+
+		Draw(fromId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+
+		for (i -= 1; i >= 0; i--) {
+			buffer.ReleaseTemporaryRT(fromId);
+			buffer.ReleaseTemporaryRT(fromId - 1);
+			fromId -= 2;
+		}
+		buffer.EndSample("Bloom");
+	}
+```
+
+![3 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/down-gaussian-3.png)
+
+![5 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/down-gaussian-5.png)
+
+我们的降采样滤波器现在已经完成，比简单的双线性过滤看起来好多了，但需要更多的纹理采样。幸运的是，我们可以通过使用双线性过滤在适当的偏移位置采样高斯采样点之间来减少一些采样量。这将九个采样减少到只有五个。我们可以在BloomVerticalPassFragment中使用这个技巧。偏移量在两个方向上变为3.23076923和1.38461538，权重为0.07027027和0.31621622。
+
+```
+	float offsets[] = {
+		-3.23076923, -1.38461538, 0.0, 1.38461538, 3.23076923
+	};
+	float weights[] = {
+		0.07027027, 0.31621622, 0.22702703, 0.31621622, 0.07027027
+	};
+	for (int i = 0; i < 5; i++) {
+		float offset = offsets[i] * GetSourceTexelSize().y;
+		color += GetSource(input.screenUV + float2(0.0, offset)).rgb * weights[i];
+	}
+```
+
+我们不能在BloomHorizontalPassFragment中这样做，因为在该通道中我们已经使用双线性过滤进行降采样。它的九个样本中的每一个都平均了2×2个源像素。
+
+### Additive Blurring
+
+使用泛光金字塔的顶部作为最终图像会产生均匀的混合效果，看起来没有任何东西在发光。我们可以通过逐渐上采样然后再降采样回到金字塔中，将所有级别累积到单个图像中来获得所需的结果。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/additive-progressive-upsampling.png)
+
+我们可以使用加法混合来组合两个图像，但让我们对所有通道使用相同的混合模式，而是添加第二个源纹理。在PostFXStack中为它声明一个标识符。
+
+```
+	int
+		fxSourceId = Shader.PropertyToID("_PostFXSource"),
+		fxSource2Id = Shader.PropertyToID("_PostFXSource2");
+```
+
+然后，不再在DoBloom完成金字塔后直接进行最终绘制。相反，释放用于上一次迭代的水平绘制的纹理，并将目标设置为用于上一级水平绘制的纹理。
+
+```
+		//Draw(fromId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+		buffer.ReleaseTemporaryRT(fromId - 1);
+		toId -= 5;
+```
+
+当我们回到时，每次迭代都以相反的方向进行绘制，将每个级别的结果作为第二个源。这只适用于第一级，所以我们必须提前停止一步。之后，使用原始图像作为辅助源绘制到最终目标。
+
+```
+	for (i -= 1; i > 0; i--) {
+			buffer.SetGlobalTexture(fxSource2Id, toId + 1);
+			Draw(fromId, toId, Pass.Copy);
+			buffer.ReleaseTemporaryRT(fromId);
+			buffer.ReleaseTemporaryRT(toId + 1);
+			fromId = toId;
+			toId -= 2;
+		}
+
+		buffer.SetGlobalTexture(fxSource2Id, sourceId);
+		Draw(fromId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+		buffer.ReleaseTemporaryRT(fromId);
+		buffer.EndSample("Bloom");
+```
+
+为了使这个工作正常，我们需要将辅助源提供给着色器通道。
+
+```
+TEXTURE2D(_PostFXSource);
+TEXTURE2D(_PostFXSource2);
+SAMPLER(sampler_linear_clamp);
+
+…
+
+float4 GetSource2(float2 screenUV) {
+	return SAMPLE_TEXTURE2D_LOD(_PostFXSource2, sampler_linear_clamp, screenUV, 0);
+}
+```
+
+并引入一个新的泛光组合通道，对两个纹理进行采样和相加。和之前一样，我只展示了片段程序，没有展示新的着色器通道或新的枚举条目。
+
+```
+float4 BloomCombinePassFragment (Varyings input) : SV_TARGET {
+	float3 lowRes = GetSource(input.screenUV).rgb;
+	float3 highRes = GetSource2(input.screenUV).rgb;
+	return float4(lowRes + highRes, 1.0);
+}
+```
+
+Use the new pass when upsampling.
+
+```
+		for (i -= 1; i > 0; i--) {
+			buffer.SetGlobalTexture(fxSource2Id, toId + 1);
+			Draw(fromId, toId, Pass.BloomCombine);
+			…
+		}
+
+		buffer.SetGlobalTexture(fxSource2Id, sourceId);
+		Draw(
+			bloomPyramidId, BuiltinRenderTextureType.CameraTarget,
+			Pass.BloomCombine
+		);
+```
+
+![3 steps](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/additive-3.png)
+
+最终，我们有了一个看起来所有东西都在发光的效果。但是，我们的新方法只在至少有两个迭代时才有效。如果我们最终只执行了一个迭代，那么我们应该跳过整个上采样阶段，只需要释放用于第一次水平通道的纹理。
+
+```
+		if (i > 1) {
+			buffer.ReleaseTemporaryRT(fromId - 1);
+			toId -= 5;
+			for (i -= 1; i > 0; i--) {
+				…
+			}
+		}
+		else {
+			buffer.ReleaseTemporaryRT(bloomPyramidId);
+		}
+```
+
+如果我们最终完全跳过了泛光效果，我们必须中止并执行复制操作。
+
+```
+		int width = camera.pixelWidth / 2, height = camera.pixelHeight / 2;
+		
+		if (
+			bloom.maxIterations == 0 ||
+			height < bloom.downscaleLimit || width < bloom.downscaleLimit
+		) {
+			Draw(sourceId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+			buffer.EndSample("Bloom");
+			return;
+		}
+```
+
+### Bicubic Upsampling
+
+虽然高斯滤波器产生了平滑的结果，但在上采样时仍然执行双线性过滤，这可能会使发光效果看起来有块状外观。这在原始图像的对比度高的地方尤为明显，尤其是在运动中。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/upsampling-bilinear.png)
+
+我们可以通过切换到双三次过滤来平滑这些伪影。虽然硬件没有直接支持这一功能，但我们可以使用Core RP库的Filtering包含文件中定义的SampleTexture2DBicubic函数。通过传递纹理和采样器状态、UV坐标以及交换了大小对的纹理大小向量来创建我们自己的GetSourceBicubic函数。此外，它还有一个用于最大纹理坐标的参数，通常为1，然后是另一个未使用的参数，可以设置为零。
+
+```
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
+
+…
+
+float4 GetSourceBicubic (float2 screenUV) {
+	return SampleTexture2DBicubic(
+		TEXTURE2D_ARGS(_PostFXSource, sampler_linear_clamp), screenUV,
+		_PostFXSource_TexelSize.zwxy, 1.0, 0.0
+	);
+}
+```
+
+在泛光组合通道中使用新函数，以便我们使用双三次过滤进行上采样。
+
+```
+float4 BloomCombinePassFragment (Varyings input) : SV_TARGET {
+	float3 lowRes = GetSourceBicubic(input.screenUV).rgb;
+	float3 highRes = GetSource2(input.screenUV).rgb;
+	return float4(lowRes + highRes, 1.0);
+}
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/upsampling-bicubic.png)
+
+通过着色器布尔值使双三次采样成为可选项，以便在不需要时可以关闭它。这对应于Universal RP和HDRP的高质量泛光切换。
+
+```
+bool _BloomBicubicUpsampling;
+
+float4 BloomCombinePassFragment (Varyings input) : SV_TARGET {
+	float3 lowRes;
+	if (_BloomBicubicUpsampling) {
+		lowRes = GetSourceBicubic(input.screenUV).rgb;
+	}
+	else {
+		lowRes = GetSource(input.screenUV).rgb;
+	}
+	float3 highRes = GetSource2(input.screenUV).rgb;
+	return float4(lowRes + highRes, 1.0);
+}
+```
+
+Add a toggle option for it to `**PostFXSettings**.**BloomSettings**`.
+
+```
+public bool bicubicUpsampling;
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/bicubic-upsampling-toggle.png)
+
+在开始上采样之前，在PostFXStack.DoBloom中将它传递给GPU。
+
+```
+	int
+		bloomBucibicUpsamplingId = Shader.PropertyToID("_BloomBicubicUpsampling"),
+		fxSourceId = Shader.PropertyToID("_PostFXSource"),
+		fxSource2Id = Shader.PropertyToID("_PostFXSource2");
+	
+	…
+	
+	void DoBloom (int sourceId) {
+		…
+		
+		buffer.SetGlobalFloat(
+			bloomBucibicUpsamplingId, bloom.bicubicUpsampling ? 1f : 0f
+		);
+		if (i > 1) { … }
+		…
+	}
+```
+
+### Half Resolution
+
+泛光可能需要很长时间来生成，因为涉及到大量的纹理采样和绘制操作。降低成本的一个简单方法是以半分辨率生成它。由于效果是柔和的，我们可以这样做。这将改变效果的外观，因为我们实际上跳过了第一个迭代。
+
+首先，在决定跳过泛光时，我们应该提前一步看。实际上，初始检查时降低限制加倍。
+
+```
+	if (
+			bloom.maxIterations == 0 ||
+			height < bloom.downscaleLimit * 2 || width < bloom.downscaleLimit * 2
+		) {
+			Draw(sourceId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+			buffer.EndSample("Bloom");
+			return;
+		}
+```
+
+其次，我们需要为半尺寸图像声明一个纹理，这将成为新的起点。它不是泛光金字塔的一部分，所以我们将为它声明一个新的标识符。我们将用它进行预过滤步骤，因此给它取一个合适的名称。
+
+```
+	int
+		bloomBucibicUpsamplingId = Shader.PropertyToID("_BloomBicubicUpsampling"),
+		bloomPrefilterId = Shader.PropertyToID("_BloomPrefilter"),
+```
+
+回到DoBloom，将源复制到预过滤纹理中，并将其用作金字塔的起点，再次将宽度和高度减半。在完成金字塔后，我们不再需要预过滤纹理，因此可以在那时释放它。
+
+```
+		RenderTextureFormat format = RenderTextureFormat.Default;
+		buffer.GetTemporaryRT(
+			bloomPrefilterId, width, height, 0, FilterMode.Bilinear, format
+		);
+		Draw(sourceId, bloomPrefilterId, Pass.Copy);
+		width /= 2;
+		height /= 2;
+
+		int fromId = bloomPrefilterId, toId = bloomPyramidId + 1;
+		int i;
+		for (i = 0; i < bloom.maxIterations; i++) {
+			…
+		}
+
+		buffer.ReleaseTemporaryRT(bloomPrefilterId);
+```
+
+### Threshold
+
+泛光通常在艺术上用来使一些物体发光，但我们当前的效果适用于所有物体，无论亮度如何。尽管这在物理上没有意义，但我们可以通过引入亮度阈值来限制对效果的贡献。
+
+我们不能突然从效果中消除颜色，因为那会在预期是渐变过渡的地方引入尖锐的边界。相反，我们将颜色乘以一个权重 $$w = \frac{\max(0, b - t)}{\max(b, 0.00001)} $$其中b是其亮度，t是配置的阈值。我们将使用颜色的RGB通道的最大值作为b。当阈值为零时，结果总是为1，这不会改变颜色。随着阈值的增加，权重曲线将向下弯曲，以便在b≤t的地方变为零。由于曲线的形状，它被称为膝盖曲线。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/threshold-graph.png)
+
+这个曲线在一个角度上达到零，这意味着虽然过渡比一个夹紧更平滑，但仍然有一个突然的截断点。这就是为什么它也被称为硬膝。我们可以通过将权重改为$$ w = \frac{\max(s, b - t)}{\max(b, 0.00001)}$$ ，其中$$ s = \frac{\min(\max(0, b - t + tk), 2tk)}{4tk + 0.00001}$$ ，tk是一个0-1的膝盖滑块，来控制膝盖的形状。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/knee-graph.png)
+
+让我们将阈值和膝盖滑块都添加到PostFXSettings.BloomSettings中。我们将配置的阈值视为伽马值，因为从视觉上来看更直观，所以在将其发送到GPU时，我们需要将其转换为线性空间。尽管阈值大于零会在这一点上消除所有颜色，但我们仍将它设计成开放的，因为我们受到LDR的限制。
+
+```
+		[Min(0f)]
+		public float threshold;
+
+		[Range(0f, 1f)]
+		public float thresholdKnee;
+```
+
+我们将通过一个名为_BloomThreshold的向量将阈值值发送到GPU。在PostFXStack中为它声明一个标识符。
+
+```
+		bloomPrefilterId = Shader.PropertyToID("_BloomPrefilter"),
+		bloomThresholdId = Shader.PropertyToID("_BloomThreshold"),
+```
+
+我们可以计算权重函数的常数部分，并将它们放入向量的四个分量中，以保持着色器更简单：![image-20230914191927240](C:\Users\admin\AppData\Roaming\Typora\typora-user-images\image-20230914191927240.png)
+
+我们将在一个新的预过滤器通道中使用它，这个通道将取代DoBloom中的初始复制通道，从而在减小图像尺寸的同时将阈值应用于2×2像素的平均值。
+
+```
+		Vector4 threshold;
+		threshold.x = Mathf.GammaToLinearSpace(bloom.threshold);
+		threshold.y = threshold.x * bloom.thresholdKnee;
+		threshold.z = 2f * threshold.y;
+		threshold.w = 0.25f / (threshold.y + 0.00001f);
+		threshold.y -= threshold.x;
+		buffer.SetGlobalVector(bloomThresholdId, threshold);
+
+		RenderTextureFormat format = RenderTextureFormat.Default;
+		buffer.GetTemporaryRT(
+			bloomPrefilterId, width, height, 0, FilterMode.Bilinear, format
+		);
+		Draw(sourceId, bloomPrefilterId, Pass.BloomPrefilter);
+```
+
+将阈值向量和将其应用于颜色的函数添加到PostFXShaderPasses中，然后添加使用它的新通道函数。
+
+```
+float3 ApplyBloomThreshold (float3 color) {
+	float brightness = Max3(color.r, color.g, color.b);
+	float soft = brightness + _BloomThreshold.y;
+	soft = clamp(soft, 0.0, _BloomThreshold.z);
+	soft = soft * soft * _BloomThreshold.w;
+	float contribution = max(soft, brightness - _BloomThreshold.x);
+	contribution /= max(brightness, 0.00001);
+	return color * contribution;
+}
+
+float4 BloomPrefilterPassFragment (Varyings input) : SV_TARGET {
+	float3 color = ApplyBloomThreshold(GetSource(input.screenUV).rgb);
+	return float4(color, 1.0);
+}
+```
+
+![inspector](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/threshold-inspector.png)
+
+![scene](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/threshold-scene.png)
+
+### Intensity
+
+在本教程中，我们通过添加一个强度滑块来完成，以控制整体的泛光效果强度。我们不会设置它的上限，因此如果需要，可以使整个图像变得过曝。
+
+```
+		[Min(0f)]
+		public float intensity;
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/intensity.png)
+
+如果强度设置为零，我们可以跳过泛光效果，因此在DoBloom的开始处检查它。
+
+```
+		if (
+			bloom.maxIterations == 0 || bloom.intensity <= 0f ||
+			height < bloom.downscaleLimit * 2 || width < bloom.downscaleLimit * 2
+		) {
+			Draw(sourceId, BuiltinRenderTextureType.CameraTarget, Pass.Copy);
+			buffer.EndSample("Bloom");
+			return;
+		}
+```
+
+否则，将强度传递到GPU，使用一个新的标识符_BloomIntensity。我们将在合并通道期间使用它来加权低分辨率图像，因此我们不需要创建额外的通道。在除了最后一次绘制到相机目标之外的所有绘制中将其设置为1。
+
+```
+		buffer.SetGlobalFloat(bloomIntensityId, 1f);
+		if (i > 1) {
+			…
+		}
+		else {
+			buffer.ReleaseTemporaryRT(bloomPyramidId);
+		}
+		buffer.SetGlobalFloat(bloomIntensityId, bloom.intensity);
+		buffer.SetGlobalTexture(fxSource2Id, sourceId);
+		Draw(fromId, BuiltinRenderTextureType.CameraTarget, Pass.BloomCombine);
+```
+
+现在我们只需要在BloomCombinePassFragment中将低分辨率颜色乘以强度即可。
+
+```
+bool _BloomBicubicUpsampling;
+float _BloomIntensity;
+
+float4 BloomCombinePassFragment (Varyings input) : SV_TARGET {
+	…
+	return float4(lowRes * _BloomIntensity + highRes, 1.0);
+}
+```
+
+![0.5](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/intensity-05.png)
+
+![5](https://catlikecoding.com/unity/tutorials/custom-srp/post-processing/bloom/intensity-5.png)

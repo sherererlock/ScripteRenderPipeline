@@ -4,14 +4,14 @@ using UnityEngine.Rendering;
 
 public partial class CameraRenderer
 {
-  	ScriptableRenderContext context;
+	ScriptableRenderContext context;
 	Camera camera;
 
 	const string bufferName = "Render Camera";
 	CommandBuffer buffer = new CommandBuffer()
-    {
+	{
 		name = bufferName
-    };
+	};
 
 	CullingResults cullingResults;
 
@@ -19,9 +19,13 @@ public partial class CameraRenderer
 	static ShaderTagId litShaderTagId = new ShaderTagId("CustomLit");
 	static ShaderTagId shadowShaderTagId = new ShaderTagId("ShadowCaster");
 
+
 	Lighting lighting = new Lighting();
 
-    public void Render (ScriptableRenderContext context, Camera camera, bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject, ShadowSetting shadowSetting) {
+	PostFXStack postFXStack = new PostFXStack();
+	static int frameBufferId = Shader.PropertyToID("_CameraFrameBuffer");
+
+	public void Render(ScriptableRenderContext context, Camera camera, bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject, ShadowSetting shadowSetting, PostFXSetting postFXSetting) {
 		this.context = context;
 		this.camera = camera;
 
@@ -35,20 +39,30 @@ public partial class CameraRenderer
 
 		lighting.Setup(context, cullingResults, shadowSetting, useLightPerObject);
 
+		postFXStack.Setup(context, camera, postFXSetting);
+
 		buffer.EndSample(SampleName);
 
-        Setup();
+		Setup();
 
-        DrawVisibleGeometry(useDynamicBatching, useGPUInstancing, useLightPerObject);
+		DrawVisibleGeometry(useDynamicBatching, useGPUInstancing, useLightPerObject);
 		DrawUnSupportedShaders();
-		DrawGizmos();
 
-		lighting.Cleanup();
+		DrawGizmosBeforeFX();
+
+        if (postFXStack.IsActive)
+        {
+            postFXStack.Render(frameBufferId);
+        }
+
+		DrawGizmosAfterFX();
+
+		Cleanup();
 
 		Submit();
-	} 
+	}
 
-	bool Cull (float maxDistance) {
+	bool Cull(float maxDistance) {
 		if (camera.TryGetCullingParameters(out ScriptableCullingParameters p)) {
 			p.shadowDistance = Mathf.Min(maxDistance, camera.farClipPlane);
 			cullingResults = context.Cull(ref p);
@@ -58,27 +72,44 @@ public partial class CameraRenderer
 	}
 
 	void Setup()
-    {
+	{
 		context.SetupCameraProperties(camera);
-		CameraClearFlags flag = camera.clearFlags;
+		CameraClearFlags flags = camera.clearFlags;
+
+		if (postFXStack.IsActive)
+		{
+            if (flags > CameraClearFlags.Color)
+            {
+                flags = CameraClearFlags.Color;
+            }
+
+            buffer.GetTemporaryRT(
+				frameBufferId, camera.pixelWidth, camera.pixelHeight,
+				32, FilterMode.Bilinear, RenderTextureFormat.Default
+			);
+			buffer.SetRenderTarget(
+				frameBufferId,
+				RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store
+			);
+		}
 
 		buffer.ClearRenderTarget(
-			flag <= CameraClearFlags.Depth,
-			flag == CameraClearFlags.Color, 
-			flag == CameraClearFlags.Color ? camera.backgroundColor.linear : Color.clear);
+			flags <= CameraClearFlags.Depth,
+			flags == CameraClearFlags.Color,
+			flags == CameraClearFlags.Color ? camera.backgroundColor.linear : Color.clear);
 
 		buffer.BeginSample(SampleName);
 		ExecuteBuffer();
-    }
+	}
 
 	void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject)
-    {
+	{
 		PerObjectData lightPerObjectFlags = useLightPerObject ? PerObjectData.LightData | PerObjectData.LightIndices : PerObjectData.None;
 
 		var sortingSetting = new SortingSettings(camera)
-        {
+		{
 			criteria = SortingCriteria.CommonOpaque
-        };
+		};
 
 		var drawSettings = new DrawingSettings(unlitShaderTagId, sortingSetting)
 		{
@@ -102,15 +133,24 @@ public partial class CameraRenderer
 	}
 
 	void Submit()
-    {
+	{
 		buffer.EndSample(SampleName);
 		ExecuteBuffer();
 		context.Submit();
-    }
+	}
 
 	void ExecuteBuffer()
-    {
+	{
 		context.ExecuteCommandBuffer(buffer);
 		buffer.Clear();
+	}
+
+	void Cleanup()
+    {
+        lighting.Cleanup();
+        if (postFXStack.IsActive)
+        {
+            buffer.ReleaseTemporaryRT(frameBufferId);
+        }
     }
 }
