@@ -1,16 +1,20 @@
 # HDR
 
+[TOC]
+
+
+
 ## High Dynamic Range
 
 到目前为止，在渲染相机时，我们一直使用低动态范围颜色（简称LDR），这是默认设置。这意味着每个颜色通道都用一个值表示，该值被夹在0到1之间。在此模式下，（0,0,0）表示黑色，（1,1,1）表示白色。虽然我们的着色器可以在此范围之外产生结果，但GPU在存储它们时会夹紧颜色，就像我们在每个片段函数的末尾使用了"saturate"一样。
 
-### Is (1,1,1) really white?
+**Is (1,1,1) really white?**
 
 这是理论上的白点，但其实际观察到的颜色取决于显示器以及其配置方式。调整显示器的亮度会改变其白点。此外，你的眼睛会根据你所看的整体光亮水平进行调整，从而改变你的相对白点。例如，如果你降低房间的光亮水平，你仍然会以相同的方式解释颜色，尽管观察到的强度已经发生了变化。你还可以在一定程度上对光照的色调偏移进行补偿。当照明突然变化时，这变得明显，因为调整是逐渐的。
 
 您可以使用帧调试器来检查每个绘制调用的渲染目标类型。普通相机的目标被描述为B8G8R8A8_SRGB。这意味着它是一个RGBA缓冲区，每个通道有8位，因此每个像素有32位。此外，RGB通道以sRGB颜色空间存储。由于我们是在线性颜色空间中工作，所以GPU在从缓冲区读取和写入时会自动在这两个空间之间进行转换。一旦渲染完成，缓冲区就会被发送到显示器，后者将其解释为sRGB颜色数据。
 
-### What about HDR displays?
+**What about HDR displays?**
 
 Unity 2022支持HDR显示，但要获得好看的HDR输出并且需要HDR显示来测试它并不是一件简单的事情。因此，**我们假设所有显示器都是LDR sRGB。**
 
@@ -110,7 +114,7 @@ HDR渲染只在与后期处理相结合时才有意义，因为我们无法更�
 
 帧调试器将显示默认的HDR格式为R16G16B16A16_SFloat，这意味着它是一个RGBA缓冲区，每个通道有16位，因此每个像素有64位，是LDR缓冲区大小的两倍。在这种情况下，每个值都是在线性空间中的有符号浮点数，没有被夹在0-1之间。
 
-### Can we use different render texture formats?
+**Can we use different render texture formats?**
 
 是的，但您必须确保您的目标平台支持它。对于本教程，我们将坚持使用默认的HDR格式，这将始终起作用。
 
@@ -120,7 +124,7 @@ HDR渲染只在与后期处理相结合时才有意义，因为我们无法更�
 
 ![ldr](https://catlikecoding.com/unity/tutorials/custom-srp/hdr/high-dynamic-range/ldr-before-post.png)
 
-### Why does the brightness change?
+**Why does the brightness change?**
 
 sRGB格式使用非线性传输函数。显示器会进行相应的调整，执行所谓的伽马校正。通常，伽马调整函数用c^2.2来近似表示，其中c是原始颜色，尽管实际的传输函数略有不同。
 
@@ -264,7 +268,7 @@ float4 BloomPrefilterFirefliesPassFragment (Varyings input) : SV_TARGET {
 ## Scattering Bloom
 
 
-现在我们有了HDR泛光效果，让我们考虑一种更现实的应用方式。想法是相机并不完美。它们的镜头不能正确聚焦所有光线。部分光线会散射到一个较大的区域，有点类似于我们目前的泛光效果。相机质量越好，散射越少。我们的加法泛光效果与之不同之处在于，散射不会增加光线，它只是将光线扩散开。散射可以在视觉上呈现出轻微的光晕，也可以是覆盖整个图像的轻微薄雾。
+现在我们有了HDR泛光效果，让我们考虑一种更现实的应用方式。想法是相机并不完美。它们的镜头不能正确聚焦所有光线。部分光线会散射到一个较大的区域，有点类似于我们目前的泛光效果。相机质量越好，散射越少。我们的加法泛光效果与之不同之处在于，散射不会增加光，它只是将光线扩散开。散射可以在视觉上呈现出轻微的光晕，也可以是覆盖整个图像的轻微薄雾。
 
 眼睛也不完美，光线在其中以复杂的方式散射。它发生在所有传入的光线上，但只有在光线很亮的时候才会真正显眼。例如，当看着一个小而明亮的光源在黑暗的背景下时，就很明显，比如夜晚的灯笼或阳光在明亮的白天的反射。
 
@@ -508,7 +512,7 @@ void DoToneMapping(int sourceId) {
 	}
 ```
 
-### Could we combine tone mapping with the final bloom pass?
+**Could we combine tone mapping with the final bloom pass?**
 
 是的，URP和HDRP在Uber通道中执行类似的操作以及更多其他操作。然而，将FX完全分离更清晰，使其更容易更改，这就是本教程中采用的方法。
 
@@ -578,7 +582,7 @@ float4 ToneMappingReinhardPassFragment (Varyings input) : SV_TARGET {
 	color.rgb /= color.rgb + 1.0;
 ```
 
-### When is precision an issue?
+**When is precision an issue?**
 
 这个问题可能会影响到某些使用半精度值的函数。由于着色器编译器的一个错误，在某些情况下，即使显式使用了float，Metal API也会出现这种情况。这也会影响到一些MacBook，而不仅仅是移动设备。
 

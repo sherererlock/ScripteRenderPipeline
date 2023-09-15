@@ -652,7 +652,7 @@ Have PostFXStack.DoBloom use these settings to limit itself.
 
 尽管这个操作混合了81个样本，但它是可分离的，这意味着它可以分为水平和垂直两个通道，每个通道混合九个样本的单行或单列。因此，我们只需要采样18次，但每次迭代需要两次绘制。
 
-### How does a separable filter work?
+**How does a separable filter work?**
 
 这是一个可以使用对称的行向量与其转置相乘来创建的滤波器。
 
@@ -686,7 +686,7 @@ float4 BloomHorizontalPassFragment (Varyings input) : SV_TARGET {
 }
 ```
 
-### Where do those weights come from?
+**Where do those weights come from?**
 
 这些权重是从帕斯卡三角派生而来的。对于一个正确的9×9高斯滤波器，我们将选择三角形的第九行，即1 8 28 56 70 56 28 8 1。但这使得滤波器边缘的样本贡献过于微弱，难以察觉，因此我们下降到第十三行并切掉其边缘，得到66 220 495 792 924 792 495 220 66。这些数字的总和是4070，所以将每个数字除以4070以获得最终的权重。
 

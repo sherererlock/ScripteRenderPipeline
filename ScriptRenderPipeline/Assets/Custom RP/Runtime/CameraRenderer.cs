@@ -25,7 +25,9 @@ public partial class CameraRenderer
 	PostFXStack postFXStack = new PostFXStack();
 	static int frameBufferId = Shader.PropertyToID("_CameraFrameBuffer");
 
-	public void Render(ScriptableRenderContext context, Camera camera, bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject, ShadowSetting shadowSetting, PostFXSetting postFXSetting) {
+	bool useHDR;
+
+	public void Render(ScriptableRenderContext context, Camera camera, bool allowHDR, bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject, ShadowSetting shadowSetting, PostFXSetting postFXSetting) {
 		this.context = context;
 		this.camera = camera;
 
@@ -34,12 +36,14 @@ public partial class CameraRenderer
 		if (!Cull(shadowSetting.maxDistance))
 			return;
 
+		useHDR = allowHDR && camera.allowHDR;
+
 		buffer.BeginSample(SampleName);
 		ExecuteBuffer();
 
 		lighting.Setup(context, cullingResults, shadowSetting, useLightPerObject);
 
-		postFXStack.Setup(context, camera, postFXSetting);
+		postFXStack.Setup(context, camera, postFXSetting, useHDR);
 
 		buffer.EndSample(SampleName);
 
@@ -51,9 +55,7 @@ public partial class CameraRenderer
 		DrawGizmosBeforeFX();
 
         if (postFXStack.IsActive)
-        {
             postFXStack.Render(frameBufferId);
-        }
 
 		DrawGizmosAfterFX();
 
@@ -85,7 +87,7 @@ public partial class CameraRenderer
 
             buffer.GetTemporaryRT(
 				frameBufferId, camera.pixelWidth, camera.pixelHeight,
-				32, FilterMode.Bilinear, RenderTextureFormat.Default
+				32, FilterMode.Bilinear, useHDR ? RenderTextureFormat.DefaultHDR : RenderTextureFormat.Default
 			);
 			buffer.SetRenderTarget(
 				frameBufferId,

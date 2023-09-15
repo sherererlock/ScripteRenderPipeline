@@ -9,6 +9,9 @@ public class CustomRenderPipelineAsset : RenderPipelineAsset
     bool useDynamicBatching = true, useGPUInstancing = true, useSRPBatcher = true, useLightPerObject = true;
 
     [SerializeField]
+    bool allowHDR = true;
+
+    [SerializeField]
     ShadowSetting shadowSetting;
 
     [SerializeField]
@@ -16,6 +19,6 @@ public class CustomRenderPipelineAsset : RenderPipelineAsset
 
     protected override RenderPipeline CreatePipeline()
     {
-        return new CustomRenderPipeline(useDynamicBatching, useGPUInstancing, useSRPBatcher, useLightPerObject, shadowSetting, postFXSetting);
+        return new CustomRenderPipeline(allowHDR, useDynamicBatching, useGPUInstancing, useSRPBatcher, useLightPerObject, shadowSetting, postFXSetting);
     }
 }
