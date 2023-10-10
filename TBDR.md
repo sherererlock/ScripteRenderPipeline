@@ -70,6 +70,42 @@ TBR一般的实现策略是对于cpu过来的commandbuffer，只对他们做vete
 - MSAA
 - 少在FS 中使用 discard 函数，调用gl_FragDepth从而打断Early-DT( HLSL中为Clip，GLSL中为discard )
 - 在移动端的TB(D)R架构中，顶点处理部分，容易成为瓶颈，避免使用曲面细分shader，置换贴图等负操作，提倡使用模型LOD,本质上减少FrameData的压力
-- 在每帧渲染之前尽量clear
+- 在每帧渲染之前尽量clear(最小化加载的tile数据量)
 - 避免大量的drawcall和顶点量
 
+------
+
+#### ShaderCore(着色核心)
+
+- Execution Engine:执行shader/数学运算
+- Load/Store Unit：对memory的存取
+- Varying Unit:对VS传入到PS的变量做内插值
+- ZS/Blend Unit: z-test和blend，访问tile-memory
+- TextureUnit:对纹理内存的操作
+
+#### FowardPixelKilling
+
+Early-Z Test是以Quad为单位测试的，只要其中有一个没被遮掉，就会执行管线的其余流程。FowardPixelKilling的工作原理是，如果发现有fragment会遮挡掉其他的，就会把其他的thread停止掉，粒度更细化
+
+#### RenderPass
+
+-  开始一个Renderpass时需要初始化tile memory
+- 结束时可能需要写回到system mem中
+- 尽可能减少RenderPasses
+
+#### Vertex Pass
+
+Position Shading - Face Test Culling - Frustum Test Culling - Sample Test Culling - Varying Shading - Polygon List
+
+#### Fragment Pass
+
+Polygon List - Rasterize - Early Z Test - Fragment Thread Creator -- Process - Late Z Test - Blend -- Tile RAM - Tile Write - Transaction Elimination(Compression) - FrameBuffer
+
+#### 优化建议
+
+1. 每次只处理一个RenderPass
+   - 不要频繁切换FrameBuffer
+2. 最小化RenderPass开始时的Tile加载
+   - glClear, glClearBuffer,glInValidateFrameBuffer()
+3. 最小化RenderPass结束时的Tile Store
+   - glInValidateFrameBuffer()
