@@ -24,16 +24,21 @@ float3 GetLighting(Surface surface, BRDF brdf, GI gi)
 
 #if defined(_LIGHTS_PER_OBJECT)
 
-	for (int j = 0; j < min(unity_LightData.y, 8); j++) {
+	for (int j = 0; j < min(unity_LightData.y, 8); j++)
+	{
 		int lightIndex = unity_LightIndices[(uint)j / 4][(uint)j % 4];
 		Light light = GetOtherLight(lightIndex, surface, data);
 		color += GetLighting(surface, brdf, light);
 	}
+
 #else
-	for (int j = 0; j < GetOtherLightCount(); j++) {
+
+	for (int j = 0; j < GetOtherLightCount(); j++)
+	{
 		Light light = GetOtherLight(j, surface, data);
 		color += GetLighting(surface, brdf, light);
 	}
+
 #endif
 
     return color;

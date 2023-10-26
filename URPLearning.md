@@ -438,3 +438,83 @@ public class ScriptableRenderPass
 }
 ```
 
+------
+
+#### SSAO整体流程
+
+```c#
+UniversalRenderPipeline.RenderSingleCamera()
+{
+    var cullResults = context.Cull(ref cullingParameters);
+    InitializeRenderingData(asset, ref cameraData, ref cullResults, anyPostProcessingEnabled, cmd, out var renderingData); 
+    
+    UniversalRenderer.AddRenderPasses(ref renderingData);
+    {
+        ScreenSpaceAmbientOcclusion.AddRenderPasses()
+        {
+            ScreenSpaceAmbientOcclusionPass.Setup()
+            {
+                ConfigureInput(); // 将depth和normal设置为输入
+                
+                UniversalRenderer.EnqueuePass(m_SSAOPass)// 加入到Pass列表中
+            }
+        }
+    }
+    
+    UniversalRenderer.Setup(context, ref renderingData);
+    {
+        RenderPassInputSummary renderPassInputs = GetRenderPassInputs(ref renderingData);
+        {
+           // ScreenSpaceAmbientOcclusionPass.input有Normal或者Depth标志位
+            inputSummary.requiresDepthPrepass |= needsNormals || needsDepth && eventBeforeMainRendering;
+        }
+        
+        requiresDepthPrepass |= renderPassInputs.requiresNormalsTexture;
+        
+        RenderingUtils.ReAllocateIfNeeded(ref m_DepthTexture, depthDescriptor, FilterMode.Point, wrapMode: TextureWrapMode.Clamp, name: "_CameraDepthTexture");
+        
+        RenderingUtils.ReAllocateIfNeeded(ref m_NormalsTexture, normalDescriptor, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraNormalsTexture");
+        
+        m_DepthNormalPrepass.Setup(m_DepthTexture, m_NormalsTexture);
+        EnqueuePass(m_DepthNormalPrepass);
+    }
+    
+    ScriptableRenderer.Execute(context, ref renderingData);
+    {
+        ScriptableRenderer.InternalStartRendering(ScriptableRenderContext context, ref RenderingData renderingData)
+        {
+            ScreenSpaceAmbientOcclusionPass.OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
+            {
+                // 分配SSAO过程中的frame buffer attachment
+                
+                ConfigureTarget(m_SSAOTextures[k_FinalTexID]);
+                ConfigureClear(ClearFlag.None, Color.white);
+            }
+            
+            DepthNormalOnlyPass.OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
+            {
+                ConfigureTarget(normalHandle, depthHandle);
+                ConfigureClear(ClearFlag.All, Color.black);
+            }
+        }
+    }
+    
+    SortStable(m_ActiveRenderPassQueue);
+    
+    ExecuteBlock()
+    {
+        ExecuteRenderPass()
+        {
+            SetRenderPassAttachments(CommandBuffer cmd, ScriptableRenderPass renderPass, ref CameraData cameraData)
+            {
+                SetRenderTarget(cmd, trimmedAttachments, depthAttachment, finalClearFlag, renderPass.clearColor);
+            }
+            
+            DepthNormalOnlyPass.ExecutePass();
+
+           	ScreenSpaceAmbientOcclusionPass.Execute();
+        }
+    }
+}
+```
+

@@ -1,67 +1,10 @@
-## Cascaded Shadow Maps
-
-
-当定向光照影响到最大阴影距离范围内的所有物体时，它们的阴影贴图最终会覆盖一个大区域。由于阴影贴图使用正交投影，每个阴影贴图中的像素都有固定的世界空间尺寸。如果这个尺寸过大，单独的阴影像素会变得明显可见，导致阴影边缘呈锯齿状，小的阴影可能会消失。增加纹理集尺寸可以减轻这个问题，但只能在一定程度上解决。
-
-使用透视相机时，远处的物体会显得较小。在某个可视距离上，一个阴影贴图像素会映射到一个单独的显示像素，这意味着阴影分辨率在理论上是最优的。靠近相机时，我们需要更高的阴影分辨率，而远离相机时，较低的分辨率就足够了。这暗示着理想情况下，我们应该根据阴影接收者的视距使用可变的阴影贴图分辨率。
-
-级联阴影贴图是解决这个问题的一种方法。其核心思想是多次渲染阴影投射者，使得每个光源在纹理集中获得多个瓦片，即级联。第一个级联只覆盖靠近相机的小区域，随后的级联逐渐缩小，以相同数量的像素覆盖越来越大的区域。着色器会为每个片段采样最合适的级联。
-
-### Settings
-
-
-Unity的阴影代码支持每个定向光最多四个级联。目前，我们只使用了一个单一的级联，覆盖了一切直到最大阴影距离。为了支持更多级联，我们将在定向阴影设置中添加一个级联数量滑块。虽然我们可以在每个定向光中使用不同的级联数量，但在所有投射阴影的定向光中使用相同数量最合理。
-
-每个级联覆盖了一部分投射阴影的区域，直到最大阴影距离。我们将通过为前三个级联添加比例滑块来使确切的部分可配置。最后一个级联始终覆盖整个范围，因此不需要滑块。默认情况下将级联数量设置为四，级联比例为0.1、0.25和0.5。这些比例应该每级联递增，但我们不会在用户界面中强制执行这一点。
-
-### Culling Spheres
-
-In Unity,每个级联（cascade）所覆盖的区域是通过创建一个剔除球来确定的。由于阴影投影是正交且是方形的，它们最终会紧密地适应其剔除球，但也会覆盖一些周围的空间。这就是为什么一些阴影可以在剔除区域之外看到。此外，光的方向对剔除球没有影响，因此所有方向光最终都使用相同的剔除球。
-
-![img](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/cascaded-shadow-maps/culling-spheres.png)
-
-### Fading Cascades
-
-我们也可以在最后一级级联的边缘淡化阴影，而不是将它们截断，使用相同的方法。为此添加一个级联淡化阴影设置滑块是一个很好的主意
-
-```
-	public struct Directional {
-
-		…
-
-		[Range(0.001f, 1f)]
-		public float cascadeFade;
-	}
-
-	public Directional directional = new Directional {
-		…
-		cascadeRatio3 = 0.5f,
-		cascadeFade = 0.1f
-	};
-```
-
-唯一的区别是，我们使用级联的平方距离和半径，而不是线性深度和最大深度。这意味着过渡变得非线性：1 - d^2 / r^2，其中 r 是剔除球体的半径。差异并不是很大，但为了保持配置的淡化比率相同，我们必须用 1 - (1 - f)^2 替换 f。然后我们将其存储在阴影距离淡化向量的 Z 分量中，再次倒转。
-
-```
-	for (i = 0; i < _CascadeCount; i++) {
-		float4 sphere = _CascadeCullingSpheres[i];
-		float distanceSqr = DistanceSquared(surfaceWS.position, sphere.xyz);
-		if (distanceSqr < sphere.w) {
-			if (i == _CascadeCount - 1) {
-				data.strength *= FadedShadowStrength(
-					distanceSqr, 1.0 / sphere.w, _ShadowDistanceFade.z
-				);
-			}
-			break;
-		}
-	}
-```
-
 ## Shadow Quality
 
 既然我们拥有了功能完善的级联阴影贴图，让我们专注于提高阴影的质量。我们一直观察到的伪影被称为阴影痤疮，它是由于那些与光线方向不完全对齐的表面错误的自阴影造成的。随着表面越来越接近与光线方向平行，痤疮问题会变得更严重。
 
 增加纹理集大小会减小纹素的世界空间大小，从而使痤疮伪影变小。然而，伪影的数量也会增加，所以问题不能简单地通过增加纹理集大小来解决。
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/shadow-acne.png)
 
 ### Depth Bias
 
@@ -74,15 +17,31 @@ In Unity,每个级联（cascade）所覆盖的区域是通过创建一个剔除�
 			buffer.SetGlobalDepthBias(0f, 0f);
 ```
 
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/constant-depth-bias.png)
+
 恒定的偏移确实简单，但只能够消除大部分正面照明的表面的伪影。要消除所有的痤疮，需要一个更大的偏移，比原来大一个数量级。
 
 ```
 		buffer.SetGlobalDepthBias(500000f, 0f);
 ```
 
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/large-depth-bias.png)
+
 然而，由于深度偏移将投射阴影的物体远离光线，采样到的阴影也会朝着相同的方向移动。足够大以消除大部分痤疮的偏移会将阴影移动得太远，以至于它们看起来与其投射物分离，导致被称为“彼得潘现象”的视觉伪影。
 
+![without](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/without-peter-panning.png)
+
+![with](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/with-peter-panning.png)
+
 另一种方法是应用斜率缩放偏移，这可以通过在SetGlobalDepthBias的第二个参数中使用非零值来实现。该值用于缩放X和Y维度上绝对裁剪空间深度导数的最大值。因此，对于正面照明的表面，这个值为零；当光线以至少在两个维度中的一个维度上以45°角射击时，它为1；当表面法线与光线方向的点积达到零时，它趋近于无穷大。因此，当需要更多偏移时，偏移会自动增加，但没有上限。结果是，为了消除痤疮，需要一个更低的因子，例如3，而不是500000。
+
+```
+buffer.SetGlobalDepthBias(0f, 3f);
+```
+
+![img](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/slope-scale-bias.png)
+
+
 
 ### Cascade Data
 
@@ -140,6 +99,14 @@ CBUFFER_START(_CustomShadows)
 CBUFFER_END
 ```
 
+```
+				data.strength *= FadedShadowStrength(
+					distanceSqr, _CascadeData[i].x, _ShadowDistanceFade.z
+				);
+```
+
+### Normal Bias
+
 不正确的自阴影发生是因为一个投射阴影的深度纹素覆盖了多个片段，这导致投射物的体积从其表面伸出。因此，如果我们缩小投射物，这种情况就不会再发生。然而，缩小投射物会使阴影变得比它们应该的更小，并且可能会引入不应该存在的空洞。
 
 我们也可以做相反的操作：在采样阴影时膨胀表面。然后，我们在表面上采样时稍微远离表面，刚好足够避免错误的自阴影。这将稍微调整阴影的位置，可能会导致边缘处的不对齐，并添加虚假的阴影，但这些伪影通常远不如彼得潘现象明显。
@@ -153,7 +120,7 @@ CBUFFER_END
 		//cascadeData[index].x = 1f / cullingSphere.w;
 		cascadeData[index] = new Vector4(
 			1f / cullingSphere.w,
-			texelSize
+			texelSize *  * 1.4142136f
 		);
 ```
 
@@ -177,6 +144,8 @@ float GetDirectionalShadowAttenuation (
 	return lerp(1.0, shadow, directional.strength);
 }
 ```
+
+![sphere](https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/shadow-quality/normal-bias-sphere.png)
 
 ### Configurable Biases
 

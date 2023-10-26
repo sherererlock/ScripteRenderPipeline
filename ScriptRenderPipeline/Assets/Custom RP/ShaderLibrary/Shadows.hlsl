@@ -42,10 +42,10 @@ SAMPLER_CMP(SHADOW_SAMPLER);
 
 CBUFFER_START(_CustomShadows)
 	int _CascadeCount;
-	float4 _ShadowDistanceFade;
+	float4 _ShadowDistanceFade; // (1 / maxDistance, 1 / distanceFade, *cascadeFade)
 	float4 _ShadowAtlasSize;
-	float4 _CullingSpheres[Max_Cascades_Count];
-	float4 _CascadeData[Max_Cascades_Count];
+	float4 _CullingSpheres[Max_Cascades_Count];// (xyz for position ,w for radius)
+	float4 _CascadeData[Max_Cascades_Count]; // (1.0f / cullingSphere.w, filterSize * 1.4142136f)
 	float4 _OtherShadowTiles[Max_Other_Light_Count];
 	float4x4 _DirectionalShadowMatrices[Max_Directional_Light_Count * Max_Cascades_Count];
 	float4x4 _OtherShadowMatrices[Max_Other_Light_Count];

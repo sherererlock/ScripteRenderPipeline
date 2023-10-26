@@ -14,22 +14,22 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   useDynamicBatching: 1
   useGPUInstancing: 1
-  useSRPBatcher: 0
+  useSRPBatcher: 1
   useLightPerObject: 0
-  allowHDR: 1
+  allowHDR: 0
   shadowSetting:
-    maxDistance: 100
-    distanceFade: 0.1
+    maxDistance: 12
+    distanceFade: 0.143
     directional:
-      cascadeRatio1: 0.1
+      cascadeRatio1: 0.155
       cascadeRatio2: 0.25
       cascadeRatio3: 0.5
-      cascadeCount: 4
+      cascadeCount: 1
       atlasSize: 2048
-      cascadeFade: 0.1
+      cascadeFade: 0.045
       filterMode: 0
       cadcadeBlend: 2
     other:
       atlasSize: 1024
       filter: 0
-  postFXSetting: {fileID: 11400000, guid: cbe345518461a1246a5921a91eb8a78d, type: 2}
+  postFXSetting: {fileID: 0}
