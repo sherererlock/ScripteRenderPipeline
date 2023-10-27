@@ -133,7 +133,6 @@ GI GetGI(float2 lightMapUV, Surface surfaceWS, BRDF brdf)
 	gi.shadowMask.shadows = SampleBakedShadows(lightMapUV, surfaceWS);
 #endif
 
-
 	return gi;
 }
 

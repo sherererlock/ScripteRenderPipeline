@@ -18,18 +18,18 @@ MonoBehaviour:
   useLightPerObject: 0
   allowHDR: 0
   shadowSetting:
-    maxDistance: 12
-    distanceFade: 0.143
+    maxDistance: 50
+    distanceFade: 0.149
     directional:
       cascadeRatio1: 0.155
       cascadeRatio2: 0.25
       cascadeRatio3: 0.5
-      cascadeCount: 1
+      cascadeCount: 4
       atlasSize: 2048
-      cascadeFade: 0.045
+      cascadeFade: 1
       filterMode: 0
       cadcadeBlend: 2
     other:
       atlasSize: 1024
-      filter: 0
+      filter: 3
   postFXSetting: {fileID: 0}
