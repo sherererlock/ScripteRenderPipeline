@@ -1,6 +1,22 @@
 #ifndef CUSTOM_GI
 #define CUSTOM_GI
 
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+TEXTURE2D(unity_Lightmap);
+SAMPLER(samplerunity_Lightmap);
+
+TEXTURE2D(unity_ShadowMask);
+SAMPLER(samplerunity_ShadowMask);
+
+TEXTURE3D_FLOAT(unity_ProbeVolumeSH);
+SAMPLER(samplerunity_ProbeVolumeSH);
+
+TEXTURECUBE(unity_SpecCube0);
+SAMPLER(samplerunity_SpecCube0);
+
+
 #ifdef LIGHTMAP_ON
 	#define GI_ATTRIBUTE_DATA float2 lightMapUV : TEXCOORD1;
 	#define GI_VARYINGS_DATA float2 lightMapUV : VAR_LIGHT_MAP_UV;
@@ -18,21 +34,6 @@
 
 #endif
 
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
-
-TEXTURE2D(unity_Lightmap);
-SAMPLER(samplerunity_Lightmap);
-
-TEXTURE2D(unity_ShadowMask);
-SAMPLER(samplerunity_ShadowMask);
-
-
-TEXTURECUBE(unity_SpecCube0);
-SAMPLER(samplerunity_SpecCube0);
-
-TEXTURE3D_FLOAT(unity_ProbeVolumeSH);
-SAMPLER(samplerunity_ProbeVolumeSH);
 
 struct GI
 {
@@ -82,15 +83,6 @@ float3 SampleLightProbe(Surface surfaceWS) {
 #endif
 }
 
-float3 SampleEnvironment(Surface surfaceWS, BRDF brdf) {
-	
-	float3 uvw = reflect(-surfaceWS.viewDirection, surfaceWS.normal);
-	float mip = PerceptualRoughnessToMipmapLevel(brdf.perceptualRoughness);
-	float4 environment = SAMPLE_TEXTURECUBE_LOD(
-		unity_SpecCube0, samplerunity_SpecCube0, uvw, mip
-	);
-	return DecodeHDREnvironment(environment, unity_SpecCube0_HDR);
-}
 
 float4 SampleBakedShadows(float2 lightMapUV, Surface surfaceWS) {
 
@@ -110,8 +102,17 @@ float4 SampleBakedShadows(float2 lightMapUV, Surface surfaceWS) {
 	else {
 		return unity_ProbesOcclusion;
 	}
-#endif
+	#endif
+}
 
+float3 SampleEnvironment(Surface surfaceWS, BRDF brdf) {
+	
+	float3 uvw = reflect(-surfaceWS.viewDirection, surfaceWS.normal);
+	float mip = PerceptualRoughnessToMipmapLevel(brdf.perceptualRoughness);
+	float4 environment = SAMPLE_TEXTURECUBE_LOD(
+		unity_SpecCube0, samplerunity_SpecCube0, uvw, mip
+	);
+	return DecodeHDREnvironment(environment, unity_SpecCube0_HDR);
 }
 
 GI GetGI(float2 lightMapUV, Surface surfaceWS, BRDF brdf)

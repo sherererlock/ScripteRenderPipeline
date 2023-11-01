@@ -26,10 +26,10 @@ MonoBehaviour:
       cascadeRatio3: 0.5
       cascadeCount: 4
       atlasSize: 2048
-      cascadeFade: 1
+      cascadeFade: 0.777
       filterMode: 0
-      cadcadeBlend: 2
+      cadcadeBlend: 0
     other:
       atlasSize: 1024
-      filter: 3
+      filter: 0
   postFXSetting: {fileID: 0}

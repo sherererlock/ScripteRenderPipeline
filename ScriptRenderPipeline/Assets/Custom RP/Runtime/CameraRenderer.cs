@@ -104,37 +104,16 @@ public partial class CameraRenderer
 		ExecuteBuffer();
 	}
 
-	void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject)
-	{
-		PerObjectData lightPerObjectFlags = useLightPerObject ? PerObjectData.LightData | PerObjectData.LightIndices : PerObjectData.None;
+    void Cleanup()
+    {
+        lighting.Cleanup();
+        if (postFXStack.IsActive)
+        {
+            buffer.ReleaseTemporaryRT(frameBufferId);
+        }
+    }
 
-		var sortingSetting = new SortingSettings(camera)
-		{
-			criteria = SortingCriteria.CommonOpaque
-		};
-
-		var drawSettings = new DrawingSettings(unlitShaderTagId, sortingSetting)
-		{
-			enableDynamicBatching = useDynamicBatching,
-			enableInstancing = useGPUInstancing,
-			perObjectData = PerObjectData.Lightmaps | PerObjectData.ShadowMask | PerObjectData.LightProbe | PerObjectData.OcclusionProbe | PerObjectData.LightProbeProxyVolume | PerObjectData.ReflectionProbes | PerObjectData.OcclusionProbeProxyVolume | lightPerObjectFlags,
-		};
-
-		drawSettings.SetShaderPassName(1, litShaderTagId);
-
-		var filteringSetting = new FilteringSettings(RenderQueueRange.opaque);
-		context.DrawRenderers(cullingResults, ref drawSettings, ref filteringSetting);
-
-		context.DrawSkybox(camera);
-
-		sortingSetting.criteria = SortingCriteria.CommonTransparent;
-		drawSettings.sortingSettings = sortingSetting;
-		filteringSetting.renderQueueRange = RenderQueueRange.transparent;
-
-		context.DrawRenderers(cullingResults, ref drawSettings, ref filteringSetting);
-	}
-
-	void Submit()
+    void Submit()
 	{
 		buffer.EndSample(SampleName);
 		ExecuteBuffer();
@@ -147,12 +126,33 @@ public partial class CameraRenderer
 		buffer.Clear();
 	}
 
-	void Cleanup()
+    void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing, bool useLightPerObject)
     {
-        lighting.Cleanup();
-        if (postFXStack.IsActive)
+        PerObjectData lightPerObjectFlags = useLightPerObject ? PerObjectData.LightData | PerObjectData.LightIndices : PerObjectData.None;
+
+        var sortingSetting = new SortingSettings(camera)
         {
-            buffer.ReleaseTemporaryRT(frameBufferId);
-        }
+            criteria = SortingCriteria.CommonOpaque
+        };
+
+        var drawSettings = new DrawingSettings(unlitShaderTagId, sortingSetting)
+        {
+            enableDynamicBatching = useDynamicBatching,
+            enableInstancing = useGPUInstancing,
+            perObjectData = PerObjectData.Lightmaps | PerObjectData.ShadowMask | PerObjectData.LightProbe | PerObjectData.OcclusionProbe | PerObjectData.LightProbeProxyVolume | PerObjectData.ReflectionProbes | PerObjectData.OcclusionProbeProxyVolume | lightPerObjectFlags,
+        };
+
+        drawSettings.SetShaderPassName(1, litShaderTagId);
+
+        var filteringSetting = new FilteringSettings(RenderQueueRange.opaque);
+        context.DrawRenderers(cullingResults, ref drawSettings, ref filteringSetting);
+
+        context.DrawSkybox(camera);
+
+        sortingSetting.criteria = SortingCriteria.CommonTransparent;
+        drawSettings.sortingSettings = sortingSetting;
+        filteringSetting.renderQueueRange = RenderQueueRange.transparent;
+
+        context.DrawRenderers(cullingResults, ref drawSettings, ref filteringSetting);
     }
 }

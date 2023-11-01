@@ -1531,11 +1531,11 @@ LODGroup:
   m_LocalReferencePoint: {x: 0, y: 0.7015, z: 0}
   m_Size: 1.403
   m_FadeMode: 1
-  m_AnimateCrossFading: 0
+  m_AnimateCrossFading: 1
   m_LastLODIsBillboard: 0
   m_LODs:
   - screenRelativeHeight: 0.6
-    fadeTransitionWidth: 1
+    fadeTransitionWidth: 0.886
     renderers:
     - renderer: {fileID: 1122417702}
   - screenRelativeHeight: 0.3
@@ -1543,7 +1543,7 @@ LODGroup:
     renderers:
     - renderer: {fileID: 1122417702}
   - screenRelativeHeight: 0.1
-    fadeTransitionWidth: 1
+    fadeTransitionWidth: 0.109
     renderers:
     - renderer: {fileID: 1153345099}
   m_Enabled: 1

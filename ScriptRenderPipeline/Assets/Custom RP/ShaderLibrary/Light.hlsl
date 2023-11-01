@@ -14,7 +14,7 @@ CBUFFER_START(_CustomLight)
     float4 _OtherLightPositions[Max_Other_Light_Count];
     float4 _OtherLightDirections[Max_Other_Light_Count];
     float4 _OtherLightSpots[Max_Other_Light_Count];
-    float4 _OtherLightShadowData[Max_Other_Light_Count];
+    float4 _OtherLightShadowData[Max_Other_Light_Count];//(strength, 0,0, maskChannel)
 CBUFFER_END
 
 struct Light

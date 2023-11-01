@@ -53,7 +53,7 @@ CBUFFER_END
 
 struct ShadowMask {
 	bool always;
-	bool distance;
+	bool distance; //  «∑Ò π”√distance
 	float4 shadows;
 };
 
